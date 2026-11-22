@@ -1732,7 +1732,8 @@ function score(b,p){
 const rejected=b=>b.univ.some(x=>S.prefs.univ[x]===-1);
 function candidates(p,opts={}){
   return BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&(opts.allowRejected||!rejected(b)))
-    .map(b=>({b,r:score(b,p)})).sort((x,y)=>y.r.t-x.r.t);
+    // à score presque égal, on mélange livres analysés à la main et livres du catalogue (ordre stable sur la journée)
+    .map(b=>({b,r:score(b,p),k:hash(b.id+new Date().toDateString())})).sort((x,y)=>(Math.round(y.r.t*40)-Math.round(x.r.t*40))||(x.k-y.k));
 }
 const compatLabel=t=>t>.33?"Très proche de vos goûts":t>.18?"Proche de vos goûts":t>.05?"À découvrir":"Pour changer";
 // Justification : les 2 ou 3 sources qui pèsent le plus
@@ -2095,7 +2096,7 @@ function recList(p){ const {list}=heroPick(p); return list.filter(x=>!x.b.future
 function becauseRail(p,exclude){
   const src=[...p.adored,...p.liked].find(id=>BY[id]); if(!src) return null;
   const s=BY[src];
-  const pool=BOOKS.filter(b=>!b.future&&!S.lib[b.id]&&!S.hidden[b.id]&&!exclude.includes(b.id)&&!rejected(b))
+  const pool=BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&!exclude.includes(b.id)&&!rejected(b))
     .map(b=>({b,s:sim(b,s)})).filter(x=>x.s>.35).sort((a,b)=>b.s-a.s).slice(0,8);
   if(pool.length<3) return null;
   return {src:s,items:pool.map(x=>({b:x.b,sub:x.b.author===s.author?"Même auteur":x.b.sub||x.b.genre}))};
