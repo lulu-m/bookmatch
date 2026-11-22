@@ -931,6 +931,10 @@ html,body{font-family:var(--ui)}
 #phone .nu .t-sub{margin-top:2px}
 
 /* Fondu doux à l'arrivée d'une couverture (seulement la première fois) */
+#phone .cv-wrap{position:relative;display:inline-block;flex:none;line-height:0}
+#phone .cv-wrap>.cv{width:100% !important}
+#phone .rm-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .18s;border-radius:2px}
+#phone .rm-cover.in{opacity:1}
 #phone .cv-img img.fade{opacity:0;transition:opacity .18s ease-out}
 #phone .cv-img img.fade.in{opacity:1}
 @media (prefers-reduced-motion:reduce){#phone .cv-img img.fade{transition:none}}
@@ -1569,7 +1573,55 @@ const freshPrefs=()=>({univ:{},sub:[],themes:[],narr:{},moods:[],habits:{},forma
 function fresh(){return {mode:"onb",name:"Vous",onb:{step:"welcome",picks:[],ri:0,gmode:"like",reasons:{}},lib:{},prefs:freshPrefs(),signals:[],hidden:{},locks:{},history:[],follow:[],skips:{},viewed:{}}}
 let S; try{S=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){S=fresh()}
 const T={tab:"decouvrir",stack:[],sheet:null,anim:null,toast:null,chat:[],thinking:false,libSeg:"lu",libQuery:"",libSearch:false,libFilter:"all",envSeg:"procurer",draft:null,scan:null,mood:null,passed:[],seed:1};
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function save(){try{ if(S.ext){ Object.keys(S.lib||{}).forEach(keepExt); ((S.onb&&S.onb.picks)||[]).forEach(keepExt); } localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+/* =========================================================
+   CATALOGUE COMPLET (Supabase) : recherche dans tous les livres,
+   livres trouvés gardés en mémoire, livres notés par l'IA ajoutés aux recommandations
+   ========================================================= */
+const API="https://tmdbgqvuzngognqixvtx.supabase.co", ANON="sb_publishable_67qHRqiKoT9D4dXYxerq1g_iEEs8LNE";
+S.ext=S.ext||{};                       // fiches des livres venus du catalogue (pour les retrouver hors ligne)
+const REMOTE={};                       // résultats de recherche déjà reçus : requête → liste d'identifiants
+const RM_BAD=new Set();                // couvertures distantes floues ou absentes (on garde la couverture générée)
+// Transforme une fiche du catalogue en livre utilisable par l'app
+function addExt(r){
+  if(!r||!r.id) return null;
+  const known=BY[r.id];
+  if(known&&!known.ext) return known;                 // livre déjà présent dans l'app
+  const tagged=!!r.tagged_at||(r.univ&&r.univ.length>0);
+  const f={}; Object.entries(r.f||{}).forEach(([k,v])=>f[k]=v>1?v/10:v);   // notes 0-10 → 0-1
+  const b=known||{};
+  Object.assign(b,{id:r.id,title:r.title,author:r.author||"Auteur inconnu",univ:(r.univ&&r.univ.length?r.univ:[]),sub:r.sub||"",themes:r.themes||[],
+    year:r.year||null,pages:r.pages||null,f,sum:r.summary||r.sum||"",cover:r.cover_url||r.cover||null,ext:true,tagged});
+  b.genre=b.sub||b.univ[0]||"Livre";
+  b.ed=b.ed||{gf:{price:0,avail:true},poche:{price:0,avail:true},ebook:{price:0,avail:true},audio:{price:0,avail:false}};
+  if(!known){ BOOKS.push(b); BY[b.id]=b; }
+  return b;
+}
+// On garde la fiche d'un livre du catalogue dès qu'il entre dans la bibliothèque
+function keepExt(id){ const b=BY[id]; if(b&&b.ext&&!S.ext[id]) S.ext[id]={id:b.id,title:b.title,author:b.author,univ:b.univ,sub:b.sub,themes:b.themes,year:b.year,pages:b.pages,summary:b.sum,cover_url:b.cover,f:Object.fromEntries(Object.entries(b.f).map(([k,v])=>[k,Math.round(v*10)])),tagged_at:b.tagged?"1":null}; }
+Object.values(S.ext).forEach(addExt);
+// Recherche dans tout le catalogue (avec délai pour ne pas interroger à chaque lettre)
+let _rq=null;
+function remoteSearch(q,done){
+  const k=norm(q.trim()); if(k.length<3) return;
+  if(REMOTE[k]){ done&&done(); return; }
+  clearTimeout(_rq); _rq=setTimeout(async()=>{
+    try{ const r=await fetch(`${API}/functions/v1/catalog-search?q=${encodeURIComponent(q.trim())}`); const d=await r.json();
+      REMOTE[k]=(d.results||[]).map(addExt).filter(Boolean).map(b=>b.id); done&&done(); }catch(e){ REMOTE[k]=[]; }
+  },350);
+}
+const remoteIds=q=>REMOTE[norm((q||"").trim())]||[];
+// Au démarrage : on récupère les livres déjà notés par l'IA pour enrichir les recommandations
+(async()=>{ try{
+  let from=0; const step=1000;
+  for(let i=0;i<20;i++){
+    const r=await fetch(`${API}/rest/v1/books?select=id,title,author,year,pages,summary,univ,sub,themes,f,cover_url,tagged_at&source=neq.curated&tagged_at=not.is.null&order=popularity.desc`,{headers:{apikey:ANON,Range:`${from}-${from+step-1}`}});
+    const rows=await r.json(); if(!Array.isArray(rows)||!rows.length) break;
+    rows.forEach(addExt); if(rows.length<step) break; from+=step;
+  }
+  render();
+}catch(e){} })();
+
 /* Définition courte de chaque univers (cartes de l'onboarding) */
 const UDEF={
   "Fiction contemporaine":"Des histoires d'aujourd'hui, proches de la vie.",
@@ -1679,7 +1731,7 @@ function score(b,p){
 }
 const rejected=b=>b.univ.some(x=>S.prefs.univ[x]===-1);
 function candidates(p,opts={}){
-  return BOOKS.filter(b=>!b.future&&!S.lib[b.id]&&!S.hidden[b.id]&&(opts.allowRejected||!rejected(b)))
+  return BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&(opts.allowRejected||!rejected(b)))
     .map(b=>({b,r:score(b,p)})).sort((x,y)=>y.r.t-x.r.t);
 }
 const compatLabel=t=>t>.33?"Très proche de vos goûts":t>.18?"Proche de vos goûts":t>.05?"À découvrir":"Pour changer";
@@ -1788,6 +1840,8 @@ function coverClassic(b,w){
 const coverSrc=(id,w)=>`covers/${id}.jpg`;
 const IMG_OK=new Set();   // images déjà chargées dans cette session
 // Quand une image a fini de charger : on la mémorise et on la fait apparaître en fondu
+document.addEventListener("load",e=>{ const im=e.target; if(im&&im.classList&&im.classList.contains("rm-cover")){ if(im.naturalWidth>=250&&im.naturalHeight>im.naturalWidth*1.2) im.classList.add("in"); else { RM_BAD.add(im.getAttribute("src")); im.remove(); } return; } },true);
+document.addEventListener("error",e=>{ const im=e.target; if(im&&im.classList&&im.classList.contains("rm-cover")){ RM_BAD.add(im.getAttribute("src")); im.remove(); } },true);
 document.addEventListener("load",e=>{ const t=e.target; if(t&&t.tagName==="IMG"&&t.closest&&t.closest(".cv-img")){ IMG_OK.add(t.getAttribute("src")); t.classList.add("in"); } },true);
 // Préchargement discret des couvertures probables (recommandations du moment), quand le téléphone est libre
 function preloadCovers(ids,big){ const idle=window.requestIdleCallback||(f=>setTimeout(f,300));
@@ -1811,6 +1865,7 @@ function cover(b,w,fs){
     const att=IMG_OK.has(src)?'decoding="sync"':'loading="lazy" decoding="async" class="fade"';
     return `<div class="cv cv-img" style="width:${w}px;font-size:${fs}px;${bg}" aria-hidden="true"><img src="${src}" alt="" ${att}></div>`;
   }
+  if(b.cover&&!RM_BAD.has(b.cover)) return `<div class="cv-wrap" style="width:${w}px">${coverClassic(b,w)}<img class="rm-cover" src="${esc(b.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>`;
   return coverClassic(b,w);
   const h=hash(b.id), comp=h%4, k=(h>>>3)%8, st=`style="width:${w}px;font-size:${fs}px"`;
   const tt=b.title.replace(" (titre à venir)",""); const lg=(tt.length>24||Math.max(...tt.split(/\s+/).map(x=>x.length))>7)?" long":"";
@@ -1991,8 +2046,10 @@ function univChips(mode){
 }
 function onbResults(q){
   const o=S.onb, n=norm(q.trim());
-  const list=BOOKS.filter(b=>!b.future&&(!n||norm(b.title+" "+b.author).includes(n))).sort((a,b)=>n?0:(b.univ.some(u=>S.prefs.univ[u]===1)?1:0)-(a.univ.some(u=>S.prefs.univ[u]===1)?1:0)).slice(0,n?10:6);
-  if(!list.length) return `<p class="t-sub muted" style="padding:20px 0">Aucun résultat. Essayez un auteur : Vargas, Austen, Herbert…</p>`;
+  const list0=BOOKS.filter(b=>!b.future&&(n?!b.ext&&norm(b.title+" "+b.author).includes(n):!b.ext)).sort((a,b)=>n?0:(b.univ.some(u=>S.prefs.univ[u]===1)?1:0)-(a.univ.some(u=>S.prefs.univ[u]===1)?1:0)).slice(0,n?10:6);
+  const list=n?[...list0,...remoteIds(q).map(id=>BY[id]).filter(b=>b&&!list0.includes(b))].slice(0,20):list0;
+  if(!list.length&&n.length>=3&&!REMOTE[n]) return `<p class="t-sub muted" style="padding:20px 0">Recherche dans tout le catalogue…</p>`;
+  if(!list.length) return `<p class="t-sub muted" style="padding:20px 0">Aucun résultat. Essayez l'auteur seul ou l'ISBN.</p>`;
   return `<p class="t-foot muted" style="margin:16px 0 0">${n?"Résultats":"Suggestions selon vos univers"}</p>`+list.map(b=>{const on=o.picks.includes(b.id);return bkRow(b,`<span class="tag ${on?"on":""}" style="height:32px;padding:0 12px;font-size:13px;pointer-events:none" aria-hidden="true">${on?ico("check")+"Choisi":"Choisir"}</span>`,null,"pick").replace('data-a="pick"',`data-a="pick" aria-pressed="${on}"`)}).join("");
 }
 
@@ -2520,8 +2577,10 @@ function addResults(q){
   const n=norm(q.trim());
   if(!n) return `<p class="t-foot muted" style="margin-top:12px">Suggestions</p>`+BOOKS.filter(b=>!b.future&&!S.lib[b.id]).slice(0,4).map(b=>bkRow(b,ico("plus","ico"),null,"addPick")).join("");
   const isbn=/^\d[\d-]{9,}$/.test(n);
-  const list=isbn?[BY["vargas-neptune"]]:BOOKS.filter(b=>!b.future&&norm(b.title+" "+b.author).includes(n));
-  if(!list.length) return `<div class="empty"><p class="t-head">Aucun résultat</p><p class="t-sub muted">Essayez un auteur (Vargas, Austen, Herbert…) ou scannez la couverture.</p><button class="b b-ghost" data-a="scan" style="margin-top:8px">Scanner</button></div>`;
+  const loc=isbn?[]:BOOKS.filter(b=>!b.future&&!b.ext&&norm(b.title+" "+b.author).includes(n));
+  const list=[...loc,...remoteIds(q).map(id=>BY[id]).filter(b=>b&&!loc.includes(b))].slice(0,30);
+  if(!list.length&&n.length>=3&&!REMOTE[n]) return `<p class="t-foot muted" style="margin-top:12px">Recherche dans tout le catalogue…</p>`;
+  if(!list.length) return `<div class="empty"><p class="t-head">Aucun résultat</p><p class="t-sub muted">Vérifiez l'orthographe, essayez l'auteur seul ou l'ISBN.</p><button class="b b-ghost" data-a="scan" style="margin-top:8px">Scanner</button></div>`;
   return `<p class="t-foot muted" style="margin-top:12px">${isbn?"Recherche par ISBN":list.length+" résultat"+(list.length>1?"s":"")}</p>`+list.map(b=>bkRow(b,S.lib[b.id]?`<span class="t-foot muted">${statusLine(b.id)}</span>`:ico("plus","ico"),null,"addPick")).join("");
 }
 
@@ -2542,7 +2601,7 @@ function assist(q,last){
     intro=`Dans l'esprit de ${ref.author} : ${join(Object.entries(ref.f).filter(([k,v])=>v>=.7&&!FEAT[k].bad).slice(0,2).map(([k])=>FEAT[k].phr))}.`; }
   else { const hit=INTENTS.find(([,re])=>re.test(n));
     if(hit){ intent=hit[0]; const m=hit[0];
-      pool=BOOKS.filter(b=>!b.future&&!S.lib[b.id]&&!S.hidden[b.id]&&(m==="decouverte"||!rejected(b))).map(b=>({b,s:moodScore(b,m)*.6+score(b,p).t*.4})).sort((a,c)=>c.s-a.s).map(x=>x.b);
+      pool=BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&(m==="decouverte"||!rejected(b))).map(b=>({b,s:moodScore(b,m)*.6+score(b,p).t*.4})).sort((a,c)=>c.s-a.s).map(x=>x.b);
       if(m==="suspense"&&/violent/.test(n)) pool=pool.filter(b=>(b.f.vi||0)<.5);
       if(/cosy/.test(n)) pool=pool.filter(b=>b.sub==="Cosy mystery").concat(pool.filter(b=>b.sub!=="Cosy mystery"));
       if(m==="decouverte") pool=pool.filter(b=>b.univ.every(u=>S.prefs.univ[u]!==1));
@@ -2609,13 +2668,14 @@ function smartMatches(q){
   const rows=[];
   const authors=[...new Set(BOOKS.filter(b=>norm(b.author).includes(n)).map(b=>b.author))];
   authors.slice(0,1).forEach(a=>rows.push({k:"author",label:a,sub:"Auteur"}));
-  BOOKS.filter(b=>!b.future&&norm(b.title).includes(n)).slice(0,2).forEach(b=>rows.push({k:"book",id:b.id,label:b.title,sub:b.author}));
+  BOOKS.filter(b=>!b.future&&!b.ext&&norm(b.title).includes(n)).slice(0,2).forEach(b=>rows.push({k:"book",id:b.id,label:b.title,sub:b.author}));
+  remoteIds(q).map(id=>BY[id]).filter(b=>b&&!rows.some(r=>r.id===b.id)).slice(0,4).forEach(b=>rows.push({k:"book",id:b.id,label:b.title,sub:b.author}));
   let ai=null;
   if(n.length>=3){ const it=smartInterpret(q), p=derive();
-    if(it.tags.length){ const ids=BOOKS.filter(b=>!b.future&&!S.lib[b.id]&&it.filters.every(f=>f(b))).map(b=>({b,s:score(b,p).t})).sort((x,y)=>y.s-x.s).slice(0,8).map(x=>x.b.id);
+    if(it.tags.length){ const ids=BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&it.filters.every(f=>f(b))).map(b=>({b,s:score(b,p).t})).sort((x,y)=>y.s-x.s).slice(0,8).map(x=>x.b.id);
       if(ids.length) ai={label:it.tags.join(" · "),ids}; }
     else if(authors.length){ const r=assist("comme "+authors[0],null); if(r.books&&r.books.length) ai={label:"Dans l'esprit de "+authors[0],ids:r.pool?r.pool.slice(0,8).map(b=>b.id):r.books}; } }
-  return {ai,rows:rows.slice(0,ai?2:3)};
+  return {ai,rows:rows.slice(0,ai?5:6)};
 }
 function smartDrop(q){
   const m=smartMatches(q); window._sqM=m;
@@ -2894,9 +2954,9 @@ document.addEventListener("focusout",e=>{ if(e.target.id==="smartQ") setTimeout(
 // Entrée : applique la première suggestion
 document.addEventListener("keydown",e=>{ if(e.target.id==="smartQ"&&e.key==="Enter"){ e.preventDefault(); const m=window._sqM; if(m&&m.ai) A.sqPickAi(); else if(m&&m.rows[0]) (m.rows[0].k==="book"?A.sqOpen({id:m.rows[0].id}):A.sqAuthor({q:m.rows[0].label})); } });
 document.addEventListener("input",e=>{
-  if(e.target.id==="onbSearch"){ T.onbQ=e.target.value; document.getElementById("onbResults").innerHTML=onbResults(T.onbQ); }
-  if(e.target.id==="smartQ"){ T.sq=e.target.value; clearTimeout(window._sqT); window._sqT=setTimeout(sqRefresh,120); }
-  if(e.target.id==="addQ"){ T.addQ=e.target.value; document.getElementById("addResults").innerHTML=addResults(T.addQ); }
+  if(e.target.id==="onbSearch"){ T.onbQ=e.target.value; const q=T.onbQ; document.getElementById("onbResults").innerHTML=onbResults(q); remoteSearch(q,()=>{ const el=document.getElementById("onbResults"); if(el&&T.onbQ===q) el.innerHTML=onbResults(q); }); }
+  if(e.target.id==="smartQ"){ T.sq=e.target.value; const q=T.sq; clearTimeout(window._sqT); window._sqT=setTimeout(sqRefresh,120); remoteSearch(q,()=>{ if(T.sq===q) sqRefresh(); }); }
+  if(e.target.id==="addQ"){ T.addQ=e.target.value; const q=T.addQ; document.getElementById("addResults").innerHTML=addResults(q); remoteSearch(q,()=>{ const el=document.getElementById("addResults"); if(el&&T.addQ===q) el.innerHTML=addResults(q); }); }
   if(e.target.id==="libQ"){ T.libQuery=e.target.value; const pos=e.target.selectionStart; render(); const i=document.getElementById("libQ"); if(i){i.focus();i.setSelectionRange(pos,pos);} }
 });
 // Clavier : Échap ferme, Tab reste dans la feuille ouverte (accessibilité)
