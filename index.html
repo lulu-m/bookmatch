@@ -1587,7 +1587,7 @@ function addExt(r){
   if(!r||!r.id) return null;
   const known=BY[r.id];
   if(known&&!known.ext) return known;                 // livre déjà présent dans l'app
-  const tagged=!!r.tagged_at||(r.univ&&r.univ.length>0);
+  const tagged=(r.level||0)>=1||!!r.tagged_at||(r.univ&&r.univ.length>0);
   const f={}; Object.entries(r.f||{}).forEach(([k,v])=>f[k]=v>1?v/10:v);   // notes 0-10 → 0-1
   const b=known||{};
   Object.assign(b,{id:r.id,title:r.title,author:r.author||"Auteur inconnu",univ:(r.univ&&r.univ.length?r.univ:[]),sub:r.sub||"",themes:r.themes||[],
@@ -1611,16 +1611,16 @@ function remoteSearch(q,done){
   },350);
 }
 const remoteIds=q=>REMOTE[norm((q||"").trim())]||[];
-// Au démarrage : on récupère les livres déjà notés par l'IA pour enrichir les recommandations
-(async()=>{ try{
-  let from=0; const step=1000;
-  for(let i=0;i<20;i++){
-    const r=await fetch(`${API}/rest/v1/books?select=id,title,author,year,pages,summary,univ,sub,themes,f,cover_url,tagged_at&source=neq.curated&tagged_at=not.is.null&order=popularity.desc`,{headers:{apikey:ANON,Range:`${from}-${from+step-1}`}});
-    const rows=await r.json(); if(!Array.isArray(rows)||!rows.length) break;
-    rows.forEach(addExt); if(rows.length<step) break; from+=step;
-  }
+// Livres du catalogue recommandables (profil par genre ou analyse IA), choisis selon les univers du lecteur
+async function loadPool(){ try{
+  const u=Object.entries(S.prefs.univ||{}).filter(([,v])=>v===1).map(([k])=>k);
+  const filt=u.length?`&univ=ov.${encodeURIComponent("{"+u.map(x=>'"'+x+'"').join(",")+"}")}`:"";
+  const sel="id,title,author,year,pages,univ,sub,themes,f,cover_url,level";
+  const get=async(q,n)=>{ const r=await fetch(`${API}/rest/v1/books?select=${sel}&source=neq.curated&level=gte.1${q}&order=popularity.desc&limit=${n}`,{headers:{apikey:ANON}}); const rows=await r.json(); if(Array.isArray(rows)) rows.forEach(addExt); };
+  await Promise.all([get(filt,u.length?2500:1500), get("",800)]);   // vos univers + les plus lus de tous les univers (pour la découverte)
   render();
-}catch(e){} })();
+}catch(e){} }
+loadPool();
 
 /* Définition courte de chaque univers (cartes de l'onboarding) */
 const UDEF={
@@ -2826,7 +2826,7 @@ const A={
     const sc=phone.querySelector(".layer .scroll"), y=sc?sc.scrollTop:0; save(); render(); const sc2=phone.querySelector(".layer .scroll"); if(sc2) sc2.scrollTop=y; },
   reason(d){ const o=S.onb, id=o.picks[o.ri], r=o.reasons[id]=o.reasons[id]||[]; if(r.includes(d.k)) o.reasons[id]=r.filter(x=>x!==d.k); else if(r.length<3) r.push(d.k); update(); },
   nextReason(){ const o=S.onb; if(o.ri<o.picks.length-1){o.ri++;update();} else { o.picks.forEach(id=>{ S.lib[id]={status:"lu",feeling:"aime",pos:o.reasons[id]||[],neg:[],date:today()}; }); o.step="quick"; update(); } },
-  finishOnb(d){ S.mode="app"; T.tab="decouvrir"; T.stack=[]; update(); if(d.id) push("fiche",{id:d.id}); },
+  finishOnb(d){ S.mode="app"; T.tab="decouvrir"; T.stack=[]; update(); loadPool(); if(d.id) push("fiche",{id:d.id}); },
   tab(d){ T.tab=d.t; T.stack=[]; T.sheet=null; render(); const sc=phone.querySelector(".scroll"); if(sc) sc.scrollTop=0; },
   open(d){ T.sheet=null; S.viewed[d.id]=(S.viewed[d.id]||0)+1; save(); push("fiche",{id:d.id}); },
   pop(){ pop(); }, closeSheet(){ closeSheet(); },
