@@ -2204,9 +2204,9 @@ function vWish(){
   return `<div class="scroll" data-scroll="wish"><div class="pad">${largeHead("Envies")}
     <div class="seg" role="tablist" style="margin:12px 0 8px"><button role="tab" aria-selected="${T.envSeg==="procurer"}" data-a="envSeg" data-s="procurer">À me procurer<span class="seg-n">${all.filter(x=>!waitingWish(x.id)).length}</span></button><button role="tab" aria-selected="${T.envSeg==="attendre"}" data-a="envSeg" data-s="attendre">À attendre<span class="seg-n">${all.filter(x=>waitingWish(x.id)).length}</span></button></div>
     ${list.length?list.map(x=>{ const f=x.e.format&&x.e.format!=="any"?x.e.format:(["poche","gf","ebook","audio"].find(k=>x.b.ed[k].avail)||"poche"); const ed=x.b.ed[f]; const wt=waitingWish(x.id);
-      const st=wt?`<span class="t-foot" style="color:var(--accent-ink)">${ed.date?`${FMTL[f]} le ${fdate(ed.date)}`:"Date à venir"}</span>${x.e.alert?`<span class="t-foot muted">Alerte activée</span>`:""}`:`<span class="t-foot" style="color:var(--success)">Disponible · ${FMTL[f]} ${price(ed.price)}</span>`;
+      const st=wt?`<span class="t-foot" style="color:var(--accent-ink)">${ed.date?`${FMTL[f]} le ${fdate(ed.date)}`:"Date à venir"}</span>${x.e.alert?`<span class="t-foot muted">Alerte activée</span>`:""}`:"";
       return `<div style="display:grid;grid-template-columns:72px minmax(0,1fr);gap:16px;padding:16px 0;border-bottom:.5px solid var(--hairline)"><button class="bk" data-a="open" data-id="${x.id}" aria-label="Voir ${esc(x.b.title)}">${cover(x.b,72,11)}</button>
-      <div style="display:flex;flex-direction:column;gap:4px"><p class="t-book-m">${esc(x.b.title)}</p><p class="t-sub muted">${esc(x.b.author)}</p><p class="t-foot">Format : ${FMTL[x.e.format||"any"]}</p><span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${st}<span class="demo">Démo</span></span>
+      <div style="display:flex;flex-direction:column;gap:4px"><p class="t-book-m">${esc(x.b.title)}</p><p class="t-sub muted">${esc(x.b.author)}</p><p class="t-foot">Format : ${FMTL[x.e.format||"any"]}</p>${st?`<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${st}</span>`:""}
       ${wt?"":`<button class="b b-text strong" data-a="editions" data-id="${x.id}" style="align-self:flex-start;height:36px">Où l'acheter</button>`}</div></div>`}).join("")
     :`<div class="empty"><p class="t-head">${T.envSeg==="procurer"?"Rien en vue pour l'instant":"Aucune sortie attendue"}</p><p class="t-sub muted">${T.envSeg==="procurer"?"Ajoutez des envies depuis Découvrir ou une fiche livre.":"Choisissez un format pas encore sorti et activez l'alerte."}</p><button class="b b-ghost" data-a="tab" data-t="decouvrir" style="margin-top:8px">Découvrir</button></div>`}
     <button class="row" data-a="tab" data-t="biblio" style="margin-top:16px;padding:0;border:0;color:var(--stone-text)"><span class="t-foot">Les livres que vous possédez déjà sont dans Bibliothèque › À lire.</span></button>
@@ -2351,6 +2351,8 @@ const VIEWS={
   },
   fiche(s){
     const b=BY[s.id], e=S.lib[b.id], p=derive(), r=score(b,p), w=why(b,p,r);
+    // Livre du catalogue : on va chercher son résumé à l'ouverture de la fiche
+    if(b.ext&&!b.sum&&!b._sq){ b._sq=1; fetch(`${API}/rest/v1/books?id=eq.${encodeURIComponent(b.id)}&select=summary,summary_src`,{headers:{apikey:ANON}}).then(r=>r.json()).then(d=>{ if(d&&d[0]&&d[0].summary){ b.sum=d[0].summary; b.sumSrc=d[0].summary_src; render(); } }).catch(()=>{}); }
     let actions="";
     if(!e) actions=b.future?`<button class="b b-primary" style="flex:1" data-a="follow" data-id="${b.id}">${S.follow.includes(b.id)?"Sortie suivie":"Suivre la sortie"}</button>`:`<button class="b b-primary" style="flex:1" data-a="wish" data-id="${b.id}">Ajouter aux envies</button><button class="b b-ghost" data-a="ficheMore" data-id="${b.id}">Autres</button>`;
     else if(e.status==="envie") actions=`<button class="b b-primary" style="flex:1" data-a="editions" data-id="${b.id}">Où l'acheter</button><button class="b b-ghost" data-a="removeWish" data-id="${b.id}">Retirer</button>`;
@@ -2366,8 +2368,8 @@ const VIEWS={
       ${e?`<span class="tag" style="margin-top:12px;cursor:default;height:28px;font-size:13px">${esc(statusLine(b.id))}</span>`:""}</div>
       <div class="pad" style="padding-top:24px;display:flex;flex-direction:column;gap:24px">
         ${!e||e.status==="envie"?`<section class="ai">${AIMARK("Pourquoi ce livre")}<p class="ai-lead">${compatLabel(r.t)}</p><p class="t-body">${esc(whyShown(b,p,w))}</p>${w.src.length?`<div class="row-src">${w.src.map(id=>cover(BY[id],22,4)).join("")}<span class="t-foot muted">D'après ${w.src.length} livre${w.src.length>1?"s":""} de votre bibliothèque</span></div>`:""}</section>`:review}
-        <section style="display:flex;flex-direction:column;gap:8px"><h2 class="t-head">Résumé</h2><p class="t-body">${esc(b.sum)}</p><div class="tags" style="margin-top:4px">${b.themes.map(t=>`<span class="t-foot muted" style="padding:4px 8px;border:1px solid var(--hairline);border-radius:10px">${esc(t)}</span>`).join("")}</div></section>
-        <div class="group"><button class="row" data-a="editions" data-id="${b.id}"><span>Éditions et formats</span><span class="r">${b.ed.poche.avail?"Poche disponible":b.ed.poche.date?`Poche le ${fdate(b.ed.poche.date)}`:b.ed.gf.avail?"Grand format":"À paraître"}${ico("chev","chev")}</span></button></div>
+        <section style="display:flex;flex-direction:column;gap:8px"><h2 class="t-head">Résumé</h2><p class="t-body">${b.sum?esc(b.sum):`<span class="muted">Pas encore de résumé pour ce livre.</span>`}</p>${b.sumSrc==="wikipedia"?`<p class="t-foot muted" style="font-size:12px">Source : <a href="https://fr.wikipedia.org/wiki/${encodeURIComponent(b.title)}" target="_blank" rel="noopener" style="color:inherit">Wikipédia</a>, licence CC BY-SA.</p>`:""}<div class="tags" style="margin-top:4px">${b.themes.map(t=>`<span class="t-foot muted" style="padding:4px 8px;border:1px solid var(--hairline);border-radius:10px">${esc(t)}</span>`).join("")}</div></section>
+        <div class="group"><button class="row" data-a="editions" data-id="${b.id}"><span>Où l'acheter</span><span class="r">${b.future?"À paraître":"Libraires et sites"}${ico("chev","chev")}</span></button></div>
       </div><div style="height:130px"></div></div>
     <div style="position:absolute;left:0;right:0;bottom:0;padding:12px 20px 32px;background:var(--paper);border-top:.5px solid var(--hairline);display:flex;gap:8px">${actions}</div>`;
   },
@@ -2376,17 +2378,24 @@ const VIEWS={
     const fm=[["poche","Poche"],["gf","Grand format"],["ebook","Numérique"],["audio","Audio"]];
     const pref=S.prefs.achat; let ms=f==="audio"?[AUDIO_M]:MERCHANTS.filter(m=>f!=="ebook"||!m.used);
     if(pref&&pref!=="any") ms=[...ms.filter(m=>m.id===pref),...ms.filter(m=>m.id!==pref)];
+    // Vrais liens vers la recherche du livre chez chaque libraire (pas de prix ni de stock inventés)
+    const isbn=(b.isbn13||(String(b.id).startsWith("isbn-")?String(b.id).slice(5):""));
+    const q=encodeURIComponent(isbn||`${b.title} ${b.author}`);
+    const SHOPS=[
+      ["Place des Libraires","Librairies indépendantes près de chez vous",`https://www.placedeslibraires.fr/listeliv.php?base=allbooks&mots_recherche=${q}`],
+      ["Leslibraires.fr","Librairies indépendantes, en ligne",`https://www.leslibraires.fr/recherche/?q=${q}`],
+      ["Decitre","Librairie en ligne",`https://www.decitre.fr/rechercher/result?q=${q}`],
+      ["Fnac","Livraison ou retrait en magasin",`https://www.fnac.com/SearchResult/ResultList.aspx?Search=${q}`],
+      ["Cultura","Livraison ou retrait en magasin",`https://www.cultura.com/search/results?search_query=${q}`],
+      ["Amazon","Livraison à domicile",`https://www.amazon.fr/s?k=${q}&i=stripbooks`]];
+    if(pref&&pref!=="any"){ const i=SHOPS.findIndex(s=>norm(s[0]).includes(norm(pref))); if(i>0) SHOPS.unshift(SHOPS.splice(i,1)[0]); }
     return `${navBar("")}<div class="scroll"><div class="pad">
-      <div style="display:flex;justify-content:space-between;align-items:center"><span class="t-foot muted">${esc(b.title)} · ${esc(b.author)}</span><span class="demo">Démo</span></div>
-      <h1 class="t-title2" style="margin:8px 0 16px">Éditions et formats</h1>
-      <div role="radiogroup" aria-label="Format" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${fm.map(([k,l])=>{const x=b.ed[k];return `<button class="choice" role="radio" aria-checked="${f===k}" data-a="fmt" data-f="${k}">${l}<small>${x.avail?price(x.price):x.date?fdate(x.date):"Non disponible"}</small></button>`}).join("")}</div>
-      ${ed.avail?`<p class="t-foot" style="margin-top:12px;color:var(--success)">Disponible</p>
-      ${f!=="audio"?`<div class="note" style="margin-top:16px">Le prix d'un livre neuf est le même partout en France. On compare donc la disponibilité, le délai et le retrait.</div>`:""}
-      <h2 class="label group-title" style="margin-left:0">Où l'acheter</h2>
-      <div>${ms.map(m=>`<button class="row" style="padding:12px 0;border-bottom:.5px solid var(--hairline)" data-a="merchant" data-m="${m.id}" data-f="${f}"><span style="display:flex;flex-direction:column;gap:4px"><span class="t-head">${m.name}${pref===m.id?` <span class="t-foot" style="color:var(--accent-ink)">· Votre préférence</span>`:""}</span><span class="t-foot muted">${m.used?"":`<span style="color:var(--success)">En stock</span> · `}${f==="ebook"?"Téléchargement immédiat":m.info}</span></span>${ico("ext","chev")}</button>`).join("")}</div>
-      <p class="t-foot muted" style="margin-top:16px;font-size:12px;line-height:16px">Marchands et prix fictifs. Dans l'app réelle, BookMatch pourra percevoir une commission, sans effet sur votre prix.</p>`
-      :`<div class="note" style="margin-top:16px">${ed.date?`Ce format sort le ${fdate(ed.date)}.`:"Ce format n'est pas disponible pour ce livre."} ${ed.date?"Ajoutez-le à vos envies pour être prévenu.":""}</div>
-      ${ed.date?`<button class="b b-primary b-block" style="margin-top:16px" data-a="wish" data-id="${b.id}" data-f="${f}">Me prévenir à la sortie</button>`:""}`}
+      <span class="t-foot muted">${esc(b.title)} · ${esc(b.author)}</span>
+      <h1 class="t-title2" style="margin:8px 0 16px">Où l'acheter</h1>
+      ${b.future?`<div class="note">Ce livre n'est pas encore sorti. Ajoutez-le à vos envies pour le garder en tête.</div><button class="b b-primary b-block" style="margin-top:16px" data-a="wish" data-id="${b.id}" data-f="any">Ajouter à mes envies</button>`:`
+      <div class="note">Le prix d'un livre neuf est le même partout en France. Choisissez simplement où vous préférez l'acheter.</div>
+      <div style="margin-top:8px">${SHOPS.map(([n,info,u])=>`<a class="row" href="${u}" target="_blank" rel="noopener" style="padding:12px 0;border-bottom:.5px solid var(--hairline);text-decoration:none;color:inherit"><span style="display:flex;flex-direction:column;gap:4px"><span class="t-head">${n}</span><span class="t-foot muted">${info}</span></span>${ico("ext","chev")}</a>`).join("")}</div>
+      <p class="t-foot muted" style="margin-top:16px;font-size:12px;line-height:16px">Chaque lien ouvre la recherche de ce livre sur le site du libraire.</p>`}
     </div><div style="height:40px"></div></div>`;
   },
   redirect(s){
