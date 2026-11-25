@@ -6,7 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="BookMatch">
-<meta name="theme-color" content="#F5F3EE">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="manifest" href="manifest.webmanifest">
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <title>BOOKMATCH</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap">
@@ -664,6 +668,13 @@ html,body{font-family:var(--ui)}
 #phone .seg-scroll .seg-n{font:500 12px/1 var(--ui);min-width:22px;height:22px;padding:0 6px;border-radius:999px !important;display:inline-flex;align-items:center;justify-content:center;background:rgba(36,35,33,.08);color:var(--r-dark)}
 #phone .seg-scroll button[aria-selected="true"] .seg-n{background:rgba(251,250,247,.2);color:var(--r-white)}
 #phone .lib-swipe{touch-action:pan-y;will-change:transform}
+
+
+/* ---------- App installée sur l'écran d'accueil (plein écran) ---------- */
+@media (display-mode: standalone){
+  html.pwa .phone{margin-top:-40px;height:calc(100dvh + 40px) !important}
+}
+html.pwa-ios .phone{margin-top:-40px;height:calc(100dvh + 40px) !important}
 
 /* ---------- Sur un vrai iPhone ---------- */
 html,body{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
@@ -1573,7 +1584,40 @@ const freshPrefs=()=>({univ:{},sub:[],themes:[],narr:{},moods:[],habits:{},forma
 function fresh(){return {mode:"onb",name:"Vous",onb:{step:"welcome",picks:[],ri:0,gmode:"like",reasons:{}},lib:{},prefs:freshPrefs(),signals:[],hidden:{},locks:{},history:[],follow:[],skips:{},viewed:{}}}
 let S; try{S=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){S=fresh()}
 const T={tab:"decouvrir",stack:[],sheet:null,anim:null,toast:null,chat:[],thinking:false,libSeg:"lu",libQuery:"",libSearch:false,libFilter:"all",envSeg:"procurer",draft:null,scan:null,mood:null,passed:[],seed:1};
-function save(){try{ if(S.ext){ Object.keys(S.lib||{}).forEach(keepExt); ((S.onb&&S.onb.picks)||[]).forEach(keepExt); } localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function save(){try{ if(S.ext){ Object.keys(S.lib||{}).forEach(keepExt); ((S.onb&&S.onb.picks)||[]).forEach(keepExt); } S.updatedAt=Date.now(); localStorage.setItem(KEY,JSON.stringify(S)); pushProfile(); }catch(e){}}
+
+/* =========================================================
+   COMPTES LECTEURS (Supabase) : connexion par code reçu par e-mail,
+   profil et bibliothèque synchronisés entre les appareils
+   ========================================================= */
+var SB=null, USER=null, _push=null;
+T.acc={step:"email",email:"",code:"",busy:false,err:""};
+function sbInit(){
+  if(SB||!window.supabase) return;
+  SB=window.supabase.createClient(API,ANON,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:"bm-auth"}});
+  SB.auth.getSession().then(({data})=>{ USER=(data.session&&data.session.user)||null; if(USER) pullProfile(); render(); });
+  SB.auth.onAuthStateChange((ev,s)=>{ USER=(s&&s.user)||null; });
+}
+window.addEventListener("load",sbInit);
+// À la connexion : on récupère le profil du compte (ou on y envoie celui du téléphone s'il est plus récent)
+async function pullProfile(){
+  try{
+    const {data,error}=await SB.from("profiles").select("data,updated_at").eq("user_id",USER.id).maybeSingle();
+    if(error) return;
+    const remote=data&&data.data&&data.data.mode?data.data:null;
+    if(remote&&((Date.parse(data.updated_at)||0)>(S.updatedAt||0)||S.mode!=="app")){
+      S=Object.assign(fresh(),remote); Object.values(S.ext||{}).forEach(addExt);
+      try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+      Object.assign(T,{tab:"decouvrir",stack:[]}); render(); loadPool();
+    } else if(S.mode==="app") pushProfile(true);
+  }catch(e){}
+}
+// Après chaque changement : envoi au compte (regroupé, 1 seconde après la dernière action)
+function pushProfile(now){
+  if(!SB||!USER) return;
+  clearTimeout(_push);
+  _push=setTimeout(async()=>{ try{ await SB.from("profiles").upsert({user_id:USER.id,data:S,updated_at:new Date(S.updatedAt||Date.now()).toISOString()}); }catch(e){} },now?0:1000);
+}
 /* =========================================================
    CATALOGUE COMPLET (Supabase) : recherche dans tous les livres,
    livres trouvés gardés en mémoire, livres notés par l'IA ajoutés aux recommandations
@@ -2240,6 +2284,10 @@ function vProfile(){
       ${want.slice(0,5).map(([k,v])=>`<button class="row" data-a="trait" data-k="${k}"><span style="display:flex;flex-direction:column;gap:1px"><span>${FEAT[k].pos}</span><span class="t-foot muted">Recherché · ${srcTxt(k,v)}</span></span><span class="r">${meterHtml(v.s)}${ico("chev","chev")}</span></button>`).join("")}
       ${avoid.slice(0,4).map(([k,v])=>`<button class="row" data-a="trait" data-k="${k}"><span style="display:flex;flex-direction:column;gap:1px"><span>${FEAT[k].neg}</span><span class="t-foot muted">Évité · ${srcTxt(k,v)}</span></span><span class="r">${meterHtml(v.s,true)}${ico("chev","chev")}</span></button>`).join("")}</div>
       <p class="t-foot muted" style="margin:8px 16px 0">Touchez une ligne pour voir d'où elle vient, ou la corriger.</p>`:""}
+    <h2 class="label group-title">Compte</h2>
+    <div class="group">${USER?`<div class="row" style="cursor:default"><span style="display:flex;flex-direction:column;gap:1px"><span>${esc(USER.email||"")}</span><span class="t-foot muted">Profil sauvegardé sur tous vos appareils</span></span></div>
+      <button class="row" data-a="logout"><span>Se déconnecter</span></button>`
+      :`<button class="row" data-a="accOpen"><span style="display:flex;flex-direction:column;gap:1px"><span>Sauvegarder mon profil</span><span class="t-foot muted">Retrouvez vos livres sur tous vos appareils</span></span>${ico("chev","chev")}</button>`}</div>
     <div class="group" style="margin-top:24px">
       <button class="row" data-a="history"><span>Historique des recommandations</span><span class="r">${S.history.length}${ico("chev","chev")}</span></button>
       <button class="row" data-a="premium"><span>BookMatch Premium</span>${ico("chev","chev")}</button></div>
@@ -2439,6 +2487,20 @@ const shead=(title,left,right)=>`<div class="grabber"></div><div class="sheet-he
 const anim=()=>T.anim==="sheet"?"sheet-enter":"";
 const prefFormat=b=>{ const f=S.prefs.formats.find(k=>!b||b.ed[k]); return f||"any"; };
 const SHEETS={
+  account(){
+    const a=T.acc;
+    const body=a.step==="email"
+      ?`<p class="t-body">Recevez un code par e-mail pour retrouver votre profil et vos livres sur tous vos appareils. Pas de mot de passe.</p>
+        <label class="field" style="margin-top:16px"><input id="accEmail" type="email" inputmode="email" autocomplete="email" placeholder="Votre adresse e-mail" value="${esc(a.email)}" aria-label="Adresse e-mail"></label>
+        ${a.err?`<p class="t-foot" style="color:var(--danger);margin-top:8px">${esc(a.err)}</p>`:""}
+        <button class="b b-primary b-block" style="margin-top:16px" data-a="accSend" ${a.busy?"disabled":""}>${a.busy?"Envoi…":"Recevoir un code"}</button>`
+      :`<p class="t-body">Saisissez le code à 6 chiffres envoyé à <strong>${esc(a.email)}</strong>.</p>
+        <label class="field" style="margin-top:16px"><input id="accCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" value="${esc(a.code)}" aria-label="Code reçu par e-mail"></label>
+        ${a.err?`<p class="t-foot" style="color:var(--danger);margin-top:8px">${esc(a.err)}</p>`:""}
+        <button class="b b-primary b-block" style="margin-top:16px" data-a="accVerify" ${a.busy?"disabled":""}>${a.busy?"Vérification…":"Valider"}</button>
+        <button class="b b-text b-block" style="margin-top:8px" data-a="accBack">Changer d'adresse ou renvoyer le code</button>`;
+    return `<section class="sheet ${anim()}" role="dialog" aria-modal="true" aria-label="Sauvegarder mon profil">${shead("Sauvegarder mon profil")}<div class="pad" style="padding-bottom:32px">${body}</div></section>`;
+  },
   add(){
     const q=T.addQ||"";
     return `<section class="sheet full ${anim()}" role="dialog" aria-modal="true" aria-label="Ajouter un livre">${shead("Ajouter un livre")}
@@ -2811,6 +2873,25 @@ function learnedSentence(b,diff,feeling){
 }
 function syncDraft(){ const c=document.getElementById("comment"); if(c&&T.draft) T.draft.comment=c.value; const p=document.getElementById("pageIn"); if(p&&T.draft) T.draft.page=p.value; }
 const A={
+  accOpen(){ sbInit(); T.acc={step:"email",email:T.acc.email||"",code:"",busy:false,err:""}; T.sheet={v:"account"}; T.anim="sheet"; render(); },
+  async accSend(){
+    const email=(T.acc.email||"").trim();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ T.acc.err="Cette adresse e-mail ne semble pas valide."; render(); return; }
+    if(!SB){ T.acc.err="Connexion impossible pour l'instant. Vérifiez votre réseau."; render(); return; }
+    Object.assign(T.acc,{busy:true,err:""}); render();
+    const {error}=await SB.auth.signInWithOtp({email,options:{shouldCreateUser:true}});
+    Object.assign(T.acc,error?{busy:false,err:/rate|limit/i.test(error.message)?"Trop de demandes. Réessayez dans quelques minutes.":"L'envoi a échoué. Réessayez."}:{busy:false,step:"code",code:""}); render();
+  },
+  async accVerify(){
+    const token=(T.acc.code||"").replace(/\D/g,"");
+    if(token.length<6){ T.acc.err="Le code contient 6 chiffres."; render(); return; }
+    Object.assign(T.acc,{busy:true,err:""}); render();
+    const {data,error}=await SB.auth.verifyOtp({email:T.acc.email.trim(),token,type:"email"});
+    if(error){ Object.assign(T.acc,{busy:false,err:"Code incorrect ou expiré."}); render(); return; }
+    USER=data.user; T.acc.busy=false; T.sheet=null; await pullProfile(); render(); toast("Profil sauvegardé");
+  },
+  accBack(){ Object.assign(T.acc,{step:"email",code:"",err:""}); render(); },
+  async logout(){ try{ await SB.auth.signOut(); }catch(e){} USER=null; render(); toast("Vous êtes déconnecté. Vos livres restent sur ce téléphone."); },
   reset(){ try{localStorage.removeItem(KEY)}catch(e){} S=fresh(); Object.assign(T,{tab:"decouvrir",stack:[],sheet:null,chat:[],toast:null,mood:null,passed:[],seed:1}); render(); },
   toEntry(){ S.mode="entry"; T.stack=[]; T.sheet=null; update(); },
   newAccount(){ S=fresh(); S.mode="onb"; S.name="Toi"; T.onbQ=""; T.mood=null; T.passed=[]; update(); },
@@ -2966,6 +3047,8 @@ document.addEventListener("keydown",e=>{ if(e.target.id==="smartQ"&&e.key==="Ent
 document.addEventListener("input",e=>{
   if(e.target.id==="onbSearch"){ T.onbQ=e.target.value; const q=T.onbQ; document.getElementById("onbResults").innerHTML=onbResults(q); remoteSearch(q,()=>{ const el=document.getElementById("onbResults"); if(el&&T.onbQ===q) el.innerHTML=onbResults(q); }); }
   if(e.target.id==="smartQ"){ T.sq=e.target.value; const q=T.sq; clearTimeout(window._sqT); window._sqT=setTimeout(sqRefresh,120); remoteSearch(q,()=>{ if(T.sq===q) sqRefresh(); }); }
+  if(e.target.id==="accEmail"){ T.acc.email=e.target.value; return; }
+  if(e.target.id==="accCode"){ T.acc.code=e.target.value; if(e.target.value.replace(/\D/g,"").length===6) A.accVerify(); return; }
   if(e.target.id==="addQ"){ T.addQ=e.target.value; const q=T.addQ; document.getElementById("addResults").innerHTML=addResults(q); remoteSearch(q,()=>{ const el=document.getElementById("addResults"); if(el&&T.addQ===q) el.innerHTML=addResults(q); }); }
   if(e.target.id==="libQ"){ T.libQuery=e.target.value; const pos=e.target.selectionStart; render(); const i=document.getElementById("libQ"); if(i){i.focus();i.setSelectionRange(pos,pos);} }
 });
@@ -3152,6 +3235,10 @@ function bindSheetDrag(sh,scrim){
 document.addEventListener("scroll",e=>{ const t=e.target; if(!t.matches||!t.matches("[data-rc]")) return;
   const card=t.querySelector(".rc-card"); if(!card) return; const step=card.getBoundingClientRect().width+14;
   const n=Math.round(t.scrollLeft/step); t.parentElement.querySelectorAll(".rc-dots i").forEach((d,i)=>d.classList.toggle("on",i===Math.min(n,t.parentElement.querySelectorAll(".rc-dots i").length-1))); },true);
+
+/* Mode app (écran d'accueil) + mise en cache hors connexion */
+try{ if(window.matchMedia("(display-mode: standalone)").matches) document.documentElement.classList.add("pwa"); if(navigator.standalone) document.documentElement.classList.add("pwa-ios"); }catch(e){}
+if("serviceWorker" in navigator && location.protocol==="https:") window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 </script>
 </body>
 </html>
