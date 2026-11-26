@@ -2138,10 +2138,20 @@ function profileMoods(list){
 }
 function recList(p){ const {list}=heroPick(p); return list.filter(x=>!x.b.future); }
 // « Parce que vous avez aimé… » : le livre le mieux noté de la bibliothèque et ses proches
+// Chaque retour dans l'app = une nouvelle « visite » : la section « Parce que vous avez aimé » change
+let VISIT=0;
+function newVisit(){ try{ VISIT=(+localStorage.getItem("bm-visit")||0)+1; localStorage.setItem("bm-visit",VISIT); }catch(e){ VISIT++; } }
+newVisit();
+let _hiddenAt=0;
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden){ _hiddenAt=Date.now(); return; }
+  if(_hiddenAt&&Date.now()-_hiddenAt>30000&&S.mode==="app"){ newVisit(); render(); }
+});
 function becauseRail(p,exclude){
   // Livre de départ : de préférence un livre aimé dans les univers choisis à l'accueil
   const lu=Object.keys(S.prefs.univ).filter(u=>S.prefs.univ[u]===1), cand=[...p.adored,...p.liked].filter(id=>BY[id]);
-  const src=cand.find(id=>BY[id].univ.some(u=>lu.includes(u)))||cand[0]; if(!src) return null;
+  const inLu=cand.filter(id=>BY[id].univ.some(u=>lu.includes(u))), srcs=inLu.length?inLu:cand; if(!srcs.length) return null;
+  const src=srcs[VISIT%srcs.length];   // un livre différent à chaque visite
   const s=BY[src];
   // Ce que le lecteur a dit aimer dans CE livre (raisons de l'accueil ou de l'avis) → axes à retrouver
   const why=(S.lib[src]&&S.lib[src].pos)||[], ax={};
@@ -2155,7 +2165,8 @@ function becauseRail(p,exclude){
       const inU=b.univ.some(u=>likedU.includes(u))||(b.univ.some(u=>s.univ.includes(u))&&!likedU.length);
       const pr=clamp(score(b,p).t*2.5,-1,1);
       return {b,si,s:.35*si+.3*pr+.2*fit(b)+(inU?.15:-.1)+(sameA&&why.includes("auteur")?.35:sameA?.1:0)}; })
-    .filter(x=>x.si>.3&&x.s>.3).sort((a,b)=>b.s-a.s).slice(0,8);
+    .filter(x=>x.si>.3&&x.s>.3).sort((a,b)=>b.s-a.s).slice(0,16)
+    .map(x=>({...x,v:x.s+(hash(x.b.id+":"+VISIT)%1000)/1000*.12})).sort((a,b)=>b.v-a.v).slice(0,8);
   if(pool.length<3) return null;
   return {src:s,items:pool.map(x=>({b:x.b,sub:x.b.author===s.author?"Même auteur":x.b.sub||x.b.genre}))};
 }
