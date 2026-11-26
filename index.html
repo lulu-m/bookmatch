@@ -2325,6 +2325,23 @@ function vProfile(){
 /* ---------- Écrans poussés ---------- */
 const edIntro=`<p class="t-sub muted" style="margin:4px 0 16px">Tout est facultatif. Les changements s'appliquent immédiatement à vos recommandations.</p>`;
 const VIEWS={
+  // Page « Auteur » : ses livres, puis des livres dans le même esprit selon le profil
+  author(s){
+    const a=s.a||"", na=norm(a), p=derive();
+    if(na.length>=3&&!REMOTE[na]) remoteSearch(a,()=>render());
+    const seen=new Set(), own=[];
+    [...BOOKS.filter(b=>!b.future&&norm(b.author)===na),...remoteIds(a).map(id=>BY[id]).filter(b=>b&&norm(b.author).includes(na))]
+      .forEach(b=>{ if(!seen.has(b.id)){ seen.add(b.id); own.push(b); } });
+    const r=assist("comme "+a,null), like=((r.pool||[]).map(b=>b.id?b:BY[b]).filter(b=>b&&norm(b.author)!==na)).slice(0,10);
+    const fav=S.prefs.authors.includes(a);
+    return `${navBar("")}<div class="scroll"><div class="pad">
+      <p class="t-foot muted">Auteur</p>
+      <h1 class="t-large" style="margin:6px 0 0">${esc(a)}</h1>
+      <p class="t-sub muted" style="margin-top:6px">${own.length} livre${own.length>1?"s":""} dans le catalogue</p>
+      <button class="b ${fav?"b-primary":"b-ghost"}" data-a="favAuthorToggle" data-q="${esc(a)}" aria-pressed="${fav}" style="margin-top:16px">${fav?"Dans vos auteurs":"Ajouter à vos auteurs"}</button>
+      ${own.length?`<h2 class="label" style="margin:28px 0 8px">Ses livres</h2>${own.map(b=>bkRow(b,null,b.year?b.genre+" · "+b.year:b.genre)).join("")}`:(na.length>=3&&!REMOTE[na]?`<p class="t-sub muted" style="padding:24px 0">Recherche de ses livres…</p>`:"")}
+      ${like.length?`<section class="nu"><span class="ai-mark">Dans le même esprit</span><p class="t-sub muted">D'autres auteurs, choisis selon votre profil</p><div class="hrow" style="margin-top:12px">${like.map(b=>bkTile(b,b.author)).join("")}</div></section>`:""}
+    </div><div style="height:60px"></div></div>`; },
   // Page dédiée à une envie : livres classés selon l'envie choisie ET le profil, envies voisines en puces
   mood(s){
     // Piste E : l'envie est découpée en nuances (sous-genres), chacune en ligne de livres classés selon le profil
@@ -2753,7 +2770,7 @@ function smartResults(q){
       ${it.tags.length?`<div class="tags" style="gap:6px">${it.tags.map(t=>`<span class="ai-tag">${esc(t)}</span>`).join("")}</div>`:""}
       <p class="t-body">${esc(text)}</p>
       ${ids.length?`<div class="ai-books">${ids.map(id=>bkRow(BY[id],null,BY[id].genre)).join("")}</div>`:""}</div>`; }
-  if(authors.length) html+=`<h2 class="label" style="margin:24px 0 8px">Auteurs</h2><div class="group">${authors.map(a=>`<button class="row" data-a="trySearch" data-q="${esc(a)}"><span style="flex:1;text-align:left">${esc(a)}</span><span class="t-foot muted">${BOOKS.filter(b=>b.author===a).length} livre${BOOKS.filter(b=>b.author===a).length>1?"s":""}</span></button>`).join("")}</div>`;
+  if(authors.length) html+=`<h2 class="label" style="margin:24px 0 8px">Auteurs</h2><div class="group">${authors.map(a=>`<button class="row" data-a="sqAuthor" data-q="${esc(a)}"><span style="flex:1;text-align:left">${esc(a)}</span><span class="t-foot muted">${BOOKS.filter(b=>b.author===a).length} livre${BOOKS.filter(b=>b.author===a).length>1?"s":""}</span></button>`).join("")}</div>`;
   if(direct.length) html+=`<h2 class="label" style="margin:24px 0 8px">Titres</h2>${direct.map(b=>bkRow(b,null,b.genre)).join("")}`;
   if(!html) html=`<div class="empty" style="margin-top:32px"><p class="t-head">Aucun résultat</p><p class="t-sub muted" style="margin-top:4px">Essayez une envie (« un polar sans violence ») ou un auteur.</p></div>`;
   return html;
@@ -2927,9 +2944,11 @@ const A={
   smartSearch(){ const i=document.getElementById("smartQ"); if(i) i.focus(); },
   sqClear(){ T.sq=""; T.sqPick=null; render(); const i=document.getElementById("smartQ"); if(i) i.focus(); },
   sqCancel(){ T.sq=""; T.sqPick=null; render(); },
-  sqPickAi(){ const m=window._sqM; if(!m||!m.ai) return; T.sqPick={label:m.ai.label,ids:m.ai.ids}; const i=document.getElementById("smartQ"); if(i) i.blur(); render(); },
+  sqPickAi(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
+  sqSearch(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
+  favAuthorToggle(d){ const L=S.prefs.authors; if(L.includes(d.q)) S.prefs.authors=L.filter(x=>x!==d.q); else L.push(d.q); update(); },
   sqOpen(d){ const i=document.getElementById("smartQ"); if(i) i.blur(); push("fiche",{id:d.id}); },
-  sqAuthor(d){ T.sq=d.q; const i=document.getElementById("smartQ"); if(i){ i.value=d.q; i.focus(); } sqRefresh(); },
+  sqAuthor(d){ const i=document.getElementById("smartQ"); if(i) i.blur(); push("author",{a:d.q}); },
   trySearch(d){ T.sq=d.q; T.sqOn=true; const i=document.getElementById("smartQ"); if(i){ i.value=d.q; } sqRefresh(); },
   pickMood(d){ T.mood=d.m; T.sq=""; T.sqOn=false; T.stack=[]; render(); const sc=phone.querySelector(".scroll"); if(sc) sc.scrollTop=0; },
   onbGo(d){ S.onb.step=d.step; if(d.step==="reasons") S.onb.ri=0; update(); },
@@ -3072,7 +3091,7 @@ document.addEventListener("submit",e=>{ e.preventDefault(); const i=document.get
 document.addEventListener("focusin",e=>{ if(e.target.id==="smartQ") sqRefresh(); });
 document.addEventListener("focusout",e=>{ if(e.target.id==="smartQ") setTimeout(()=>{ if(document.activeElement!==document.getElementById("smartQ")){ const d=document.getElementById("smartDrop"); if(d){ d.innerHTML=""; d.classList.remove("open"); } } },160); });
 // Entrée : applique la première suggestion
-document.addEventListener("keydown",e=>{ if(e.target.id==="smartQ"&&e.key==="Enter"){ e.preventDefault(); const m=window._sqM; if(m&&m.ai) A.sqPickAi(); else if(m&&m.rows[0]) (m.rows[0].k==="book"?A.sqOpen({id:m.rows[0].id}):A.sqAuthor({q:m.rows[0].label})); } });
+document.addEventListener("keydown",e=>{ if(e.target.id==="smartQ"&&e.key==="Enter"){ e.preventDefault(); A.sqSearch(); } });
 document.addEventListener("input",e=>{
   if(e.target.id==="onbSearch"){ T.onbQ=e.target.value; const q=T.onbQ; document.getElementById("onbResults").innerHTML=onbResults(q); remoteSearch(q,()=>{ const el=document.getElementById("onbResults"); if(el&&T.onbQ===q) el.innerHTML=onbResults(q); }); }
   if(e.target.id==="smartQ"){ T.sq=e.target.value; const q=T.sq; clearTimeout(window._sqT); window._sqT=setTimeout(sqRefresh,120); remoteSearch(q,()=>{ if(T.sq===q) sqRefresh(); }); }
