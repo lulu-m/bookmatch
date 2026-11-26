@@ -3300,5 +3300,8 @@ document.addEventListener("scroll",e=>{ const t=e.target; if(!t.matches||!t.matc
 try{ if(window.matchMedia("(display-mode: standalone)").matches) document.documentElement.classList.add("pwa"); if(navigator.standalone) document.documentElement.classList.add("pwa-ios"); }catch(e){}
 if("serviceWorker" in navigator && location.protocol==="https:") window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 </script>
+<!-- Scanner : vraie caméra (code-barres avec ZXing, couverture avec Tesseract) -->
+<script src="vendor/zxing.min.js"></script>
+<script src="scanner.js"></script>
 </body>
 </html>
