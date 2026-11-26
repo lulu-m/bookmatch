@@ -2330,8 +2330,15 @@ const VIEWS={
     const a=s.a||"", na=norm(a), p=derive();
     if(na.length>=3&&!REMOTE[na]) remoteSearch(a,()=>render());
     const seen=new Set(), own=[];
-    [...BOOKS.filter(b=>!b.future&&norm(b.author)===na),...remoteIds(a).map(id=>BY[id]).filter(b=>b&&norm(b.author).includes(na))]
+    [...BOOKS.filter(b=>norm(b.author)===na),...remoteIds(a).map(id=>BY[id]).filter(b=>b&&norm(b.author).includes(na))]
       .forEach(b=>{ if(!seen.has(b.id)){ seen.add(b.id); own.push(b); } });
+    // Date de parution (jour précis si connu, sinon l'année) et filtre Parus / À paraître
+    const relD=b=>b.recent||(b.year?b.year+"-01-01":""), td=today();
+    const soon=b=>!!b.future||(!!b.recent&&b.recent>td)||(!!b.year&&b.year>+td.slice(0,4));
+    const out=own.filter(b=>!soon(b)).sort((x,y)=>relD(y).localeCompare(relD(x)));   // parus : du plus récent au plus ancien
+    const up=own.filter(soon).sort((x,y)=>relD(x).localeCompare(relD(y)));           // à paraître : le plus proche d'abord
+    const f=s.f||"out", shown=f==="up"?up:out;
+    const dTxt=b=>soon(b)?(b.recent?"Sortie le "+new Date(b.recent).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):b.year?"Sortie en "+b.year:"À paraître"):(b.recent?new Date(b.recent).toLocaleDateString("fr-FR",{month:"long",year:"numeric"}):b.year||"");
     const r=assist("comme "+a,null), like=((r.pool||[]).map(b=>b.id?b:BY[b]).filter(b=>b&&norm(b.author)!==na)).slice(0,10);
     const fav=S.prefs.authors.includes(a);
     return `${navBar("")}<div class="scroll"><div class="pad">
@@ -2339,7 +2346,11 @@ const VIEWS={
       <h1 class="t-large" style="margin:6px 0 0">${esc(a)}</h1>
       <p class="t-sub muted" style="margin-top:6px">${own.length} livre${own.length>1?"s":""} dans le catalogue</p>
       <button class="b ${fav?"b-primary":"b-ghost"}" data-a="favAuthorToggle" data-q="${esc(a)}" aria-pressed="${fav}" style="margin-top:16px">${fav?"Dans vos auteurs":"Ajouter à vos auteurs"}</button>
-      ${own.length?`<h2 class="label" style="margin:28px 0 8px">Ses livres</h2>${own.map(b=>bkRow(b,null,b.year?b.genre+" · "+b.year:b.genre)).join("")}`:(na.length>=3&&!REMOTE[na]?`<p class="t-sub muted" style="padding:24px 0">Recherche de ses livres…</p>`:"")}
+      ${own.length?`<h2 class="label" style="margin:28px 0 8px">Ses livres</h2>
+        <div class="seg-scroll" role="tablist" aria-label="Filtrer ses livres" style="margin-bottom:8px">
+          <button role="tab" aria-selected="${f==="out"}" data-a="authorF" data-f="out">Parus · ${out.length}</button>
+          <button role="tab" aria-selected="${f==="up"}" data-a="authorF" data-f="up">À paraître · ${up.length}</button></div>
+        ${shown.length?shown.map(b=>bkRow(b,null,[b.genre,dTxt(b)].filter(Boolean).join(" · "))).join(""):`<p class="t-sub muted" style="padding:16px 0">${f==="up"?"Aucune sortie annoncée pour l'instant.":"Aucun livre paru dans le catalogue."}</p>`}`:(na.length>=3&&!REMOTE[na]?`<p class="t-sub muted" style="padding:24px 0">Recherche de ses livres…</p>`:"")}
       ${like.length?`<section class="nu"><span class="ai-mark">Dans le même esprit</span><p class="t-sub muted">D'autres auteurs, choisis selon votre profil</p><div class="hrow" style="margin-top:12px">${like.map(b=>bkTile(b,b.author)).join("")}</div></section>`:""}
     </div><div style="height:60px"></div></div>`; },
   // Page dédiée à une envie : livres classés selon l'envie choisie ET le profil, envies voisines en puces
@@ -2946,6 +2957,7 @@ const A={
   sqCancel(){ T.sq=""; T.sqPick=null; render(); },
   sqPickAi(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
   sqSearch(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
+  authorF(d){ const top=T.stack[T.stack.length-1]; if(top&&top.v==="author"){ top.f=d.f; T.anim=null; render(); } },
   favAuthorToggle(d){ const L=S.prefs.authors; if(L.includes(d.q)) S.prefs.authors=L.filter(x=>x!==d.q); else L.push(d.q); update(); },
   sqOpen(d){ const i=document.getElementById("smartQ"); if(i) i.blur(); push("fiche",{id:d.id}); },
   sqAuthor(d){ const i=document.getElementById("smartQ"); if(i) i.blur(); push("author",{a:d.q}); },
