@@ -35,7 +35,7 @@ function attach(){
   const v=document.getElementById("scanVideo");
   if(!v){ if(SC.stream) camStop(); return; }
   if(SC.stream&&v.srcObject!==SC.stream){ v.srcObject=SC.stream; v.play().catch(()=>{}); }
-  if(SC.stream&&T.scanMode==="barcode"&&T.scan==="aim"&&!SC.timer) SC.timer=setInterval(readBarcode,250);
+  if(SC.stream&&T.scanMode==="barcode"&&T.scan==="aim"&&!SC.timer){ SC.aimAt=Date.now(); T.scanSlow=false; SC.timer=setInterval(readBarcode,250); }
   if(T.scan!=="aim"||T.scanMode!=="barcode"){ clearInterval(SC.timer); SC.timer=null; }
 }
 const _render=window.render; window.render=function(){ const r=_render.apply(this,arguments); try{ attach(); }catch(e){} return r; };
@@ -52,7 +52,10 @@ function grab(zoneW,zoneH,scale=1){
 // ---------- Code-barres ----------
 function readBarcode(){
   if(SC.busy||!window.ZXing) return;
-  const c=grab(.85,.6); if(!c) return;
+  // Au bout de 8 s sans lecture, un conseil s'affiche
+  if(!T.scanSlow&&SC.aimAt&&Date.now()-SC.aimAt>8000){ T.scanSlow=true; render(); }
+  // On alterne une zone large et une zone resserrée (petits codes-barres ou livre tenu loin)
+  SC.tick=(SC.tick||0)+1; const c=SC.tick%2?grab(.85,.6):grab(.55,.6,1.6); if(!c) return;
   try{
     if(!SC.reader){ SC.reader=new ZXing.MultiFormatReader(); const h=new Map();
       h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A]);
@@ -65,26 +68,51 @@ function readBarcode(){
 async function findIsbn(isbn){
   SC.busy=true; T.scan="busy"; T.scanMsg="Code-barres lu : recherche du livre…"; render();
   try{
-    // 1) Déjà dans l'app ?
-    let b=BY["isbn-"+isbn]||BOOKS.find(x=>x.isbn===isbn);
-    // 2) Catalogue BookMatch, par ISBN exact
+    // 1) Déjà dans l'app, ou dans le catalogue BookMatch avec exactement cet ISBN
+    let b=BY["isbn-"+isbn]||BOOKS.find(x=>x.isbn===isbn||x.isbn13===isbn);
     if(!b){ const r=await fetch(`${API}/rest/v1/books?select=id,title,author,year,pages,univ,sub,themes,f,cover_url,level,summary&isbn13=eq.${isbn}&limit=1`,{headers:{apikey:ANON}}).then(r=>r.json()).catch(()=>null);
       if(Array.isArray(r)&&r[0]) b=addExt(r[0]); }
-    // 3) Recherche du catalogue complet
-    if(!b){ await new Promise(res=>{ remoteSearch(isbn,res); setTimeout(res,6000); }); const ids=remoteIds(isbn); b=ids.length?BY[ids[0]]:null; }
-    // 4) Google Books puis Open Library (gratuits, sans clé), puis recherche du titre dans le catalogue
-    if(!b){ const r=await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:"+isbn).then(r=>r.json()).catch(()=>null);
-      let vi=r&&r.items&&r.items[0]&&r.items[0].volumeInfo;
-      if(!vi){ const o=await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`).then(r=>r.json()).catch(()=>null), d=o&&o["ISBN:"+isbn];
-        if(d) vi={title:d.title,authors:(d.authors||[]).map(a=>a.name),publishedDate:(d.publish_date||"").match(/\d{4}/)?.[0],pageCount:d.number_of_pages,imageLinks:d.cover?{thumbnail:d.cover.large||d.cover.medium}:null}; }
-      if(vi){ const q=vi.title+" "+((vi.authors||[])[0]||"");
-        await new Promise(res=>{ remoteSearch(q,res); setTimeout(res,6000); });
-        const hit=remoteIds(q).map(id=>BY[id]).find(x=>x&&norm(x.title).includes(norm(vi.title).slice(0,12)));
-        b=hit||addExt({id:"isbn-"+isbn,title:vi.title,author:(vi.authors||[]).join(", ")||"Auteur inconnu",year:vi.publishedDate?+vi.publishedDate.slice(0,4):null,pages:vi.pageCount||null,
-          summary:vi.description||"",cover_url:vi.imageLinks?(vi.imageLinks.thumbnail||"").replace("http:","https:").replace("&edge=curl",""):null}); } }
-    if(b){ T.scanHit=b.id; T.scan="ok"; } else { T.scan="fail"; T.scanErr="Ce code-barres n'est pas dans notre catalogue."; }
-  }catch(e){ T.scan="fail"; T.scanErr="La recherche n'a pas abouti. Vérifiez votre connexion."; }
+    // 2) Sinon, on retrouve le titre et l'auteur de cette édition (BnF, puis Google Books, puis Open Library : gratuits)
+    let info=null;
+    if(!b) info=await isbnInfo(isbn);
+    // 3) Puis on cherche ce titre dans le catalogue : une autre édition du même livre compte
+    if(!b&&info){
+      const nt=norm(info.title), last=norm(info.author.split(/\s+/).pop()||"");
+      const same=x=>x&&(norm(x.title)===nt||norm(x.title).startsWith(nt)||nt.startsWith(norm(x.title)))&&(!last||norm(x.author).includes(last));
+      b=BOOKS.find(same);
+      if(!b){ const q=info.title+" "+info.author; await new Promise(res=>{ remoteSearch(q,res); setTimeout(res,6000); }); b=remoteIds(q).map(id=>BY[id]).find(same); }
+      // 4) Livre absent du catalogue : on l'ajoute quand même avec ce qu'on sait
+      if(!b) b=addExt({id:"isbn-"+isbn,title:info.title,author:info.author||"Auteur inconnu",year:info.year||null,pages:info.pages||null,summary:info.summary||"",
+        cover_url:info.cover||`https://products-images.di-static.com/image/x/${isbn}-475x500-1.jpg`,univ:[],sub:"",themes:[],f:{}});
+    }
+    if(b){ T.scanHit=b.id; T.scan="ok"; } else { T.scan="fail"; T.scanErr=`Code lu : ${isbn}. Ce livre n'a été trouvé dans aucun catalogue.`; }
+  }catch(e){ T.scan="fail"; T.scanErr=`Code lu : ${isbn}. La recherche n'a pas abouti, vérifiez votre connexion.`; }
   SC.busy=false; render();
+}
+// Titre, auteur, année d'une édition à partir de son ISBN
+async function isbnInfo(isbn){
+  const tmo=(p,ms=7000)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(null),ms))]);
+  // BnF : toutes les éditions françaises (dépôt légal)
+  try{
+    const x=await tmo(fetch("https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve&recordSchema=dublincore&maximumRecords=1&query="+encodeURIComponent('bib.isbn adj "'+isbn+'"')).then(r=>r.text()));
+    if(x){ const d=new DOMParser().parseFromString(x,"text/xml"), g=n=>{ const e=d.getElementsByTagNameNS("*",n)[0]; return e?e.textContent.trim():""; };
+      const t=g("title").split(/\s[:\/]\s/)[0].trim();
+      const c=g("creator").replace(/\s*\(.*$/,"").replace(/\.\s*Auteur.*$/,"").trim(), [nom,pre]=c.split(/,\s*/);
+      if(t) return {title:t,author:pre?pre+" "+nom:nom||"",year:+(g("date").match(/\d{4}/)||[])[0]||null}; }
+  }catch(e){}
+  // Google Books
+  try{
+    const r=await tmo(fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:"+isbn).then(r=>r.json()));
+    const v=r&&r.items&&r.items[0]&&r.items[0].volumeInfo;
+    if(v&&v.title) return {title:v.title,author:(v.authors||[]).join(", "),year:+(v.publishedDate||"").slice(0,4)||null,pages:v.pageCount,summary:v.description,
+      cover:v.imageLinks?(v.imageLinks.thumbnail||"").replace("http:","https:").replace("&edge=curl",""):null};
+  }catch(e){}
+  // Open Library
+  try{
+    const o=await tmo(fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`).then(r=>r.json())), d=o&&o["ISBN:"+isbn];
+    if(d&&d.title) return {title:d.title,author:(d.authors||[]).map(a=>a.name).join(", "),year:+((d.publish_date||"").match(/\d{4}/)||[])[0]||null,pages:d.number_of_pages,cover:d.cover&&(d.cover.large||d.cover.medium)};
+  }catch(e){}
+  return null;
 }
 
 // ---------- Couverture (lecture du texte) ----------
@@ -120,7 +148,7 @@ VIEWS.scan=function(){
   const st=T.scan||"aim", mode=T.scanMode||"barcode", b=T.scanHit?BY[T.scanHit]:null;
   const fc=st==="ok"?"var(--accent)":"#FFFFFF";
   const frame=mode==="barcode"?"width:290px;height:170px":"width:230px;height:340px";
-  const msg=st==="busy"?(T.scanMsg||"Analyse en cours…"):st==="ok"?"Livre trouvé":mode==="barcode"?"Visez le code-barres au dos du livre":"Cadrez la couverture, puis touchez le bouton";
+  const msg=st==="busy"?(T.scanMsg||"Analyse en cours…"):st==="ok"?"Livre trouvé":mode==="barcode"?(T.scanSlow?"Tenez le livre à 15 cm environ, bien éclairé, code-barres à l'horizontale":"Visez le code-barres au dos du livre"):"Cadrez la couverture, puis touchez le bouton";
   return `<div style="position:absolute;inset:0;background:#000;color:#FFFFFF;display:flex;flex-direction:column;overflow:hidden">
     <video id="scanVideo" playsinline muted autoplay style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
     <div style="position:absolute;inset:0;background:rgba(0,0,0,.35)"></div>
