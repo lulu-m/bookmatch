@@ -1,7 +1,7 @@
 // BOOKMATCH — service worker : l'app s'ouvre vite, et même hors connexion
 // Changer VERSION à chaque mise en ligne force la mise à jour chez les lecteurs.
-const VERSION = "bm-v2";
-const SHELL = ["./", "index.html", "manifest.webmanifest", "icons/icon-192-v2.png", "icons/apple-touch-icon-v2.png",
+const VERSION = "bm-v3";
+const SHELL = ["./", "index.html", "manifest.webmanifest", "icons/icon-192-v3.png", "icons/apple-touch-icon-v3.png",
   ...Array.from({ length: 10 }, (_, n) => `sprites/s${n}.jpg`)];
 
 // Installation : on garde la coquille de l'app et les planches de couvertures
