@@ -12,10 +12,16 @@ async function camStart(){
   if(SC.stream) return true;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ T.scan="nocam"; T.scanErr="Votre navigateur ne donne pas accès à la caméra."; render(); return false; }
   try{
-    SC.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
+    try{ SC.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}}); }
+    catch(e1){ if(e1&&e1.name==="NotAllowedError") throw e1; SC.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:true}); }
     return true;
   }catch(e){
-    T.scan="nocam"; T.scanErr=e&&e.name==="NotAllowedError"?"L'accès à la caméra a été refusé. Autorisez-le dans Réglages › Safari › Caméra, puis réessayez.":"La caméra n'a pas pu s'ouvrir.";
+    // Message précis selon la cause (le code entre parenthèses aide à diagnostiquer)
+    const n=e&&e.name||"Erreur";
+    T.scanErr=n==="NotAllowedError"?"L'accès à la caméra a été refusé. Autorisez-le dans Réglages › Safari › Caméra (ou Réglages › Apps › Safari › Caméra), puis réessayez.":
+      n==="NotReadableError"?"La caméra est déjà utilisée par une autre app. Fermez-la, puis réessayez.":
+      n==="NotFoundError"||n==="OverconstrainedError"?"Aucune caméra arrière n'a été trouvée.":"La caméra n'a pas pu s'ouvrir.";
+    T.scanErr+=" ("+n+")"; T.scan="nocam";
     render(); return false;
   }
 }
