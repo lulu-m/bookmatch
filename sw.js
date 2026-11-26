@@ -1,6 +1,6 @@
 // BOOKMATCH — service worker : l'app s'ouvre vite, et même hors connexion
 // Changer VERSION à chaque mise en ligne force la mise à jour chez les lecteurs.
-const VERSION = "bm-v12";
+const VERSION = "bm-v13";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icons/icon-192-v4.png", "icons/apple-touch-icon-v4.png",
   ...Array.from({ length: 10 }, (_, n) => `sprites/s${n}.jpg`)];
 
@@ -21,8 +21,14 @@ self.addEventListener("fetch", (e) => {
   if (url.hostname.endsWith("supabase.co")) return;
   // Page de l'app : réseau d'abord (pour avoir la dernière version), sinon la copie gardée
   if (req.mode === "navigate" || url.pathname.endsWith("/index.html")) {
-    e.respondWith(fetch(req).then((r) => { const c = r.clone(); caches.open(VERSION).then((x) => x.put("index.html", c)); return r; })
+    e.respondWith(fetch(req, { cache: "no-cache" }).then((r) => { const c = r.clone(); caches.open(VERSION).then((x) => x.put("index.html", c)); return r; })
       .catch(() => caches.match("index.html")));
+    return;
+  }
+  // Scripts de l'app : réseau d'abord (toujours la dernière version), copie gardée hors connexion
+  if (url.origin === location.origin && url.pathname.endsWith(".js") && !url.pathname.endsWith("sw.js")) {
+    e.respondWith(fetch(req, { cache: "no-cache" }).then((r) => { const c = r.clone(); caches.open(VERSION).then((x) => x.put(req, c)); return r; })
+      .catch(() => caches.match(req)));
     return;
   }
   // Couvertures et polices : copie gardée d'abord (affichage instantané), réseau sinon
