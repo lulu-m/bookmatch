@@ -2918,7 +2918,9 @@ const A={
     const sc=phone.querySelector(".layer .scroll"), y=sc?sc.scrollTop:0; save(); render(); const sc2=phone.querySelector(".layer .scroll"); if(sc2) sc2.scrollTop=y; },
   reason(d){ const o=S.onb, id=o.picks[o.ri], r=o.reasons[id]=o.reasons[id]||[]; if(r.includes(d.k)) o.reasons[id]=r.filter(x=>x!==d.k); else r.push(d.k); update(); }, // Autant de raisons que le lecteur veut
   nextReason(){ const o=S.onb; if(o.ri<o.picks.length-1){o.ri++;update();} else { o.picks.forEach(id=>{ S.lib[id]={status:"lu",feeling:"aime",pos:o.reasons[id]||[],neg:[],date:today()}; }); o.step="quick"; update(); } },
-  finishOnb(d){ S.mode="app"; T.tab="decouvrir"; T.stack=[]; update(); loadPool(); if(d.id) push("fiche",{id:d.id}); },
+  finishOnb(d){ S.mode="app"; S.onb.step="done"; T.tab="decouvrir"; T.stack=[]; T.sheet=null;
+    try{ update(); }catch(err){ console.error(err); save(); location.reload(); return; }   // si l'affichage plante, on recharge directement dans l'app
+    loadPool(); if(d.id) push("fiche",{id:d.id}); },
   tab(d){ T.tab=d.t; T.stack=[]; T.sheet=null; render(); const sc=phone.querySelector(".scroll"); if(sc) sc.scrollTop=0; },
   open(d){ T.sheet=null; S.viewed[d.id]=(S.viewed[d.id]||0)+1; save(); push("fiche",{id:d.id}); },
   pop(){ pop(); }, closeSheet(){ closeSheet(); },
@@ -3038,7 +3040,9 @@ const _close=A.closeSheet; A.closeSheet=function(){ if(T.prevSheet==="assistant"
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-a]"); if(!el) return;
   e.preventDefault(); e.stopPropagation();
-  const d=Object.assign({},el.dataset); if(A[d.a]) A[d.a](d);
+  const d=Object.assign({},el.dataset);
+  // Filet de sécurité : si une action plante, on l'affiche au lieu de rester bloqué sans rien dire
+  try{ if(A[d.a]) A[d.a](d); }catch(err){ console.error(err); try{ toast("Un souci est survenu ("+(err&&err.message||"erreur")+"). Réessayez."); }catch(_){} }
 });
 document.addEventListener("submit",e=>{ e.preventDefault(); const i=document.getElementById("askIn"); if(i){ const q=i.value; i.value=""; ask(q); } });
 document.addEventListener("focusin",e=>{ if(e.target.id==="smartQ") sqRefresh(); });
