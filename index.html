@@ -2032,7 +2032,7 @@ function vOnb(){
       <span class="t-foot muted" style="display:block;margin-top:20px">Livre ${o.ri+1} sur ${o.picks.length}</span>
       <div style="display:grid;grid-template-columns:72px 1fr;gap:16px;align-items:end;margin-top:12px">${cover(b,72,11)}<div><p class="t-book-m">${esc(b.title)}</p><p class="t-sub muted">${esc(b.author)}</p></div></div>
       <h1 class="t-title2" style="margin-top:24px">Pourquoi l'avez-vous aimé ?</h1>
-      <p class="t-sub muted" style="margin-top:8px">Jusqu'à 3 raisons. C'est ce qui rend vos recommandations justes.</p>
+      <p class="t-sub muted" style="margin-top:8px">Choisissez toutes celles qui comptent. C'est ce qui rend vos recommandations justes.</p>
       <div class="tags" style="margin-top:16px">${POS.map(([k,l])=>`<button class="tag ${sel.includes(k)?"on":""}" aria-pressed="${sel.includes(k)}" data-a="reason" data-k="${k}">${sel.includes(k)?ico("check"):""}${l}</button>`).join("")}</div><div style="height:140px"></div></div>
       ${foot(`<button class="b b-primary b-block" data-a="nextReason">${o.ri<o.picks.length-1?"Livre suivant":"Continuer"}</button><button class="b b-text" data-a="nextReason" style="align-self:center">Passer ce livre</button>`)}</div>`;
   }
@@ -2916,7 +2916,7 @@ const A={
   onbHabit(d){ S.prefs.habits.longueur=S.prefs.habits.longueur===d.v?undefined:d.v; update(); },
   pick(d){ const o=S.onb; if(o.picks.includes(d.id)) o.picks=o.picks.filter(x=>x!==d.id); else if(o.picks.length<3) o.picks.push(d.id); else toast("Trois livres maximum pour démarrer"); // On ne remet pas le curseur dans la recherche (sinon le clavier s'ouvre sur iPhone) : on garde juste la position de défilement
     const sc=phone.querySelector(".layer .scroll"), y=sc?sc.scrollTop:0; save(); render(); const sc2=phone.querySelector(".layer .scroll"); if(sc2) sc2.scrollTop=y; },
-  reason(d){ const o=S.onb, id=o.picks[o.ri], r=o.reasons[id]=o.reasons[id]||[]; if(r.includes(d.k)) o.reasons[id]=r.filter(x=>x!==d.k); else if(r.length<3) r.push(d.k); update(); },
+  reason(d){ const o=S.onb, id=o.picks[o.ri], r=o.reasons[id]=o.reasons[id]||[]; if(r.includes(d.k)) o.reasons[id]=r.filter(x=>x!==d.k); else r.push(d.k); update(); }, // Autant de raisons que le lecteur veut
   nextReason(){ const o=S.onb; if(o.ri<o.picks.length-1){o.ri++;update();} else { o.picks.forEach(id=>{ S.lib[id]={status:"lu",feeling:"aime",pos:o.reasons[id]||[],neg:[],date:today()}; }); o.step="quick"; update(); } },
   finishOnb(d){ S.mode="app"; T.tab="decouvrir"; T.stack=[]; update(); loadPool(); if(d.id) push("fiche",{id:d.id}); },
   tab(d){ T.tab=d.t; T.stack=[]; T.sheet=null; render(); const sc=phone.querySelector(".scroll"); if(sc) sc.scrollTop=0; },
