@@ -2139,10 +2139,23 @@ function profileMoods(list){
 function recList(p){ const {list}=heroPick(p); return list.filter(x=>!x.b.future); }
 // « Parce que vous avez aimé… » : le livre le mieux noté de la bibliothèque et ses proches
 function becauseRail(p,exclude){
-  const src=[...p.adored,...p.liked].find(id=>BY[id]); if(!src) return null;
+  // Livre de départ : de préférence un livre aimé dans les univers choisis à l'accueil
+  const lu=Object.keys(S.prefs.univ).filter(u=>S.prefs.univ[u]===1), cand=[...p.adored,...p.liked].filter(id=>BY[id]);
+  const src=cand.find(id=>BY[id].univ.some(u=>lu.includes(u)))||cand[0]; if(!src) return null;
   const s=BY[src];
+  // Ce que le lecteur a dit aimer dans CE livre (raisons de l'accueil ou de l'avis) → axes à retrouver
+  const why=(S.lib[src]&&S.lib[src].pos)||[], ax={};
+  why.forEach(k=>{ const m=POSM[k]; if(m==="STYLE") STYLEF.forEach(f=>ax[f]=(ax[f]||0)+.4); else if(m) Object.entries(m).forEach(([f,w])=>ax[f]=(ax[f]||0)+w); });
+  const axW=Object.values(ax).reduce((a,w)=>a+Math.abs(w),0);
+  const fit=b=>axW?Object.entries(ax).reduce((a,[f,w])=>a+w*(b.f[f]||0),0)/axW:0;
+  const likedU=Object.keys(S.prefs.univ).filter(u=>S.prefs.univ[u]===1);
+  // Score : proche du livre, mais aussi des univers choisis à l'accueil et des raisons données
   const pool=BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&!exclude.includes(b.id)&&!rejected(b))
-    .map(b=>({b,s:sim(b,s)})).filter(x=>x.s>.35).sort((a,b)=>b.s-a.s).slice(0,8);
+    .map(b=>{ const si=sim(b,s), sameA=b.author===s.author;
+      const inU=b.univ.some(u=>likedU.includes(u))||(b.univ.some(u=>s.univ.includes(u))&&!likedU.length);
+      const pr=clamp(score(b,p).t*2.5,-1,1);
+      return {b,si,s:.35*si+.3*pr+.2*fit(b)+(inU?.15:-.1)+(sameA&&why.includes("auteur")?.35:sameA?.1:0)}; })
+    .filter(x=>x.si>.3&&x.s>.3).sort((a,b)=>b.s-a.s).slice(0,8);
   if(pool.length<3) return null;
   return {src:s,items:pool.map(x=>({b:x.b,sub:x.b.author===s.author?"Même auteur":x.b.sub||x.b.genre}))};
 }
