@@ -2230,7 +2230,7 @@ function recRow(x,n,p,withBtns){
   return `<div class="rec-row-wrap"><div class="rec-row">
     ${n?`<span class="rec-n" aria-hidden="true">${n}</span>`:""}
     <button class="rec-open" data-a="open" data-id="${x.b.id}">${cover(x.b,56,9.5)}<span class="rec-txt"><span class="tt">${esc(x.b.title)}</span><span class="t-foot muted">${esc(x.b.author)}</span><span class="rec-why">${esc(shortWhy(x.b,p,x.r))}</span></span></button>
-    ${withBtns?`<span class="rec-btns"><button class="b b-primary sm" data-a="wish" data-id="${x.b.id}">Envie</button><button class="b b-ghost sm" data-a="notForMe" data-id="${x.b.id}">Pas pour moi</button></span>`:moreBtn(x.b)}
+    ${withBtns?`<span class="rec-btns"><button class="b b-primary sm" data-a="wish" data-id="${x.b.id}">Envie</button></span>`:moreBtn(x.b)}
   </div>${withBtns?"":recMenu(x.b.id)}</div>`;
 }
 
