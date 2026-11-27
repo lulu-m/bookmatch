@@ -905,7 +905,7 @@ html,body{font-family:var(--ui)}
 #phone .rc-title{margin:4px 0 0;font:600 20px/24px var(--ui);letter-spacing:-.01em}
 #phone .rc-why{margin:4px 0 0;display:flex;gap:8px;align-items:flex-start;font:400 14px/20px var(--ui);color:var(--ink)}
 #phone .rc-why svg{width:14px;height:14px;flex:none;margin-top:3px;color:var(--accent,#4B3FD1)}
-#phone .rc-act{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:10px}
+#phone .rc-act{display:grid;grid-template-columns:1fr;gap:8px;margin-top:auto;padding-top:10px}
 #phone .rc-act .b{height:44px;padding:0 10px;font-size:15px}
 #phone .rc-end{cursor:pointer;justify-content:center;align-items:flex-start;gap:6px;padding:24px;background:var(--sand);box-shadow:none}
 #phone .rc-arrow{margin-top:8px;width:44px;height:44px;border-radius:999px;background:var(--ink);color:#fff;display:inline-flex;align-items:center;justify-content:center}
@@ -2256,7 +2256,7 @@ function rcCard(x,p,i){
       <h3 class="rc-title"><button class="linkish" data-a="open" data-id="${b.id}">${esc(b.title)}</button></h3>
       <span class="t-sub muted">${esc(b.author)}</span>
       <p class="rc-why"><span>${esc(shortWhy(b,p,x.r))}</span></p>
-      <div class="rc-act"><button class="b b-primary" data-a="wish" data-id="${b.id}">Envie</button><button class="b b-ghost" data-a="notForMe" data-id="${b.id}">Pas pour moi</button></div>
+      <div class="rc-act"><button class="b b-primary" data-a="wish" data-id="${b.id}">Envie</button></div>
     </div></article>`;
 }
 function vDiscover(){
