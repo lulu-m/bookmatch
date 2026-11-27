@@ -859,8 +859,8 @@ html,body{font-family:var(--ui)}
 #phone .cv-cl .rule{width:1.6em;height:.04em;background:var(--c)}
 #phone .cv-cl .ti{font-family:"EB Garamond",serif;font-weight:500;line-height:1.05;color:var(--c);overflow-wrap:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 #phone .cv-cl .sub{font-family:"EB Garamond",serif;font-style:italic;font-size:.52em}
-#phone .cv-cl .bm{position:absolute;left:0;right:0;bottom:1em;text-align:center;font-family:"EB Garamond",serif;font-size:.42em;letter-spacing:.3em;color:var(--c)}
-#phone .cv-cl.t-s .au,#phone .cv-cl.t-s .rule,#phone .cv-cl.t-s .bm,#phone .cv-cl.t-s .sub,#phone .cv-cl.t-m .sub{display:none}
+#phone .cv-cl .sig{position:absolute;left:0;right:0;bottom:2.9em;padding-left:.3em;line-height:1;text-align:center;font-family:"EB Garamond",serif;font-size:.42em;letter-spacing:.3em;color:var(--c)}
+#phone .cv-cl.t-s .au,#phone .cv-cl.t-s .rule,#phone .cv-cl.t-s .sig,#phone .cv-cl.t-s .sub,#phone .cv-cl.t-m .sub{display:none}
 
 /* ===== Piste F : Recommandé pour vous ===== */
 #phone .rec{margin-top:24px;display:flex;flex-direction:column;gap:14px}
@@ -1933,7 +1933,7 @@ function coverClassic(b,w){
   // Taille du titre selon sa longueur (≈ 10 % de la largeur pour un titre court), un peu plus grande en vignette 56 px pour rester lisible
   const k=(L<=8?1.05:L<=14?.95:L<=22?.85:.75)*(tier==="t-s"?1.25:1);
   return `<div class="cv cv-cl ${tier}" style="width:${w}px;font-size:${(w/10).toFixed(1)}px;--c:${c}" aria-hidden="true"><span class="f1"></span><span class="f2"></span>
-    <div class="in"><span class="au">${esc(b.author)}</span><span class="rule"></span><span class="ti" style="font-size:${k.toFixed(2)}em">${esc(tt)}</span><span class="sub">${esc(b.sub||"")}</span></div><span class="bm">B · M</span></div>`;
+    <div class="in"><span class="au">${esc(b.author)}</span><span class="rule"></span><span class="ti" style="font-size:${k.toFixed(2)}em">${esc(tt)}</span><span class="sub">${esc(b.sub||"")}</span></div><span class="sig">B · M</span></div>`;
 }
 // ===== Couvertures rapides =====
 const coverSrc=(id,w)=>`covers/${id}.jpg`;
