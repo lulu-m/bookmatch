@@ -2265,7 +2265,7 @@ const SUBDESC={"Thriller psychologique":"Manipulation, doutes, coups de théâtr
 const moodShort=k=>cap(MOODS[k].label.replace("Envie d'","").replace("Envie de ",""));
 // Une grande carte : couverture sur fond doux, affinité, titre, raison, Envie / Pas pour moi
 // ---------- Fond des cartes teinté par la couleur principale de la couverture ----------
-const TINT_K=.05;   // part de la couleur dans le fond (5 %)
+const TINT_K=.24;   // part de la couleur dans le fond (24 %)
 const TINT=(()=>{ try{ return JSON.parse(localStorage.getItem("bm-tint")||"{}"); }catch(e){ return {}; } })();
 const tintBg=([r,g,b])=>`rgb(${Math.round(255+(r-255)*TINT_K)},${Math.round(255+(g-255)*TINT_K)},${Math.round(255+(b-255)*TINT_K)})`;
 function saveTint(id,c){ TINT[id]=c; try{ localStorage.setItem("bm-tint",JSON.stringify(TINT)); }catch(e){} }
