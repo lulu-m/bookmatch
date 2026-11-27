@@ -1643,40 +1643,58 @@ function addExt(r){
   return b;
 }
 // On garde la fiche d'un livre du catalogue dès qu'il entre dans la bibliothèque
-// ---------- Résumés : base BookMatch, puis Google Books, puis Wikipédia (gratuits), gardés sur le téléphone ----------
-const SUMC=(()=>{ try{ return JSON.parse(localStorage.getItem("bm-sum")||"{}"); }catch(e){ return {}; } })();
-function putSum(b,sum,src,url){ b.sum=sum; b.sumSrc=src; b.sumUrl=url||""; SUMC[b.id]={s:sum,src,url:url||""};
-  try{ const k=Object.keys(SUMC); if(k.length>400) delete SUMC[k[0]]; localStorage.setItem("bm-sum",JSON.stringify(SUMC)); }catch(e){}
-  if(S.ext[b.id]) S.ext[b.id].summary=sum; }
-const clean=t=>(t||"").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s+/g," ").trim();
+// ---------- Résumés longs : base BookMatch, puis Google Books, puis Wikipédia (gratuits), gardés sur le téléphone ----------
+// b.sum = accroche courte (cartes, recommandations) ; b.long = vrai résumé affiché sur la fiche
+const SUMC=(()=>{ try{ return JSON.parse(localStorage.getItem("bm-sum2")||"{}"); }catch(e){ return {}; } })();
+const LONG=300;   // en dessous, un résumé est jugé trop court pour la fiche
+function putSum(b,txt,src,url){ b.long=txt; b.sumSrc=src; b.sumUrl=url||"";
+  if(!b.sum) b.sum=(txt.match(/^.{40,220}?[.!?](\s|$)/)||[txt.slice(0,200)])[0].trim();
+  SUMC[b.id]={s:txt,src,url:url||""};
+  try{ const k=Object.keys(SUMC); if(k.length>400) delete SUMC[k[0]]; localStorage.setItem("bm-sum2",JSON.stringify(SUMC)); }catch(e){}
+  if(S.ext[b.id]) S.ext[b.id].summary=b.sum; }
+const clean=t=>(t||"").replace(/<br\s*\/?>/gi,"\n").replace(/<\/p>/gi,"\n").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/[ \t]+/g," ").replace(/\n\s*\n+/g,"\n\n").trim();
+// Dans un article Wikipédia en texte brut, on prend la section qui raconte l'histoire
+function wikiPlot(txt){
+  const m=txt.match(/\n==+\s*(Résumé|Intrigue|Synopsis|Histoire|Argument|L'histoire|Trame|Contenu|Présentation)[^=\n]*==+\n([\s\S]*?)(?=\n==[^=]|$)/i);
+  if(!m) return "";
+  return m[2].replace(/\n===+\s*([^=\n]+)\s*===+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
 async function loadSummary(b){
   b._sq=1;
-  const c=SUMC[b.id]; if(c){ b.sum=c.s; b.sumSrc=c.src; b.sumUrl=c.url; b._sq=2; return; }
+  const c=SUMC[b.id]; if(c){ b.long=c.s; b.sumSrc=c.src; b.sumUrl=c.url; b._sq=2; return; }
   const tmo=(p,ms=7000)=>Promise.race([p,new Promise(r=>setTimeout(()=>r(null),ms))]);
+  const done=()=>{ b._sq=2; render(); };
   const last=norm((b.author||"").split(",")[0].trim().split(/\s+/).pop()||""), nt=norm(b.title);
   let isbn=(b.id.match(/^isbn-(\d{13})$/)||[])[1]||"";
   try{
-    // 1) Base BookMatch
-    const d=await tmo(fetch(`${API}/rest/v1/books?id=eq.${encodeURIComponent(b.id)}&select=summary,summary_src,isbn13`,{headers:{apikey:ANON}}).then(r=>r.json()));
-    if(d&&d[0]){ isbn=isbn||d[0].isbn13||""; if(d[0].summary&&d[0].summary.length>40){ putSum(b,d[0].summary,d[0].summary_src||""); b._sq=2; render(); return; } }
+    // 1) Base BookMatch (livres du catalogue)
+    if(b.ext){ const d=await tmo(fetch(`${API}/rest/v1/books?id=eq.${encodeURIComponent(b.id)}&select=summary,summary_src,isbn13`,{headers:{apikey:ANON}}).then(r=>r.json()));
+      if(d&&d[0]){ isbn=isbn||d[0].isbn13||""; const t=d[0].summary||"";
+        if(t.length>=LONG){ putSum(b,t,d[0].summary_src||""); return done(); }
+        if(t&&!b.sum) b.sum=t; } }
     // 2) Google Books : présentation de l'éditeur, en français de préférence
     const gq=isbn?["isbn:"+isbn]:[];
     gq.push(`intitle:"${b.title}"`+(last?` inauthor:${last}`:""));
     for(const q of gq){
-      const r=await tmo(fetch("https://www.googleapis.com/books/v1/volumes?maxResults=5&langRestrict=fr&q="+encodeURIComponent(q)).then(r=>r.json()));
-      const it=(r&&r.items||[]).map(x=>x.volumeInfo).find(v=>v&&v.description&&v.description.length>80&&(q.startsWith("isbn:")||(norm(v.title).includes(nt.slice(0,15))&&(!last||norm((v.authors||[]).join(" ")).includes(last)))));
-      if(it){ putSum(b,clean(it.description),"google"); b._sq=2; render(); return; }
+      const r=await tmo(fetch("https://www.googleapis.com/books/v1/volumes?maxResults=8&langRestrict=fr&q="+encodeURIComponent(q)).then(r=>r.json()));
+      const ok=v=>v&&v.description&&(q.startsWith("isbn:")||(norm(v.title).includes(nt.slice(0,15))&&(!last||norm((v.authors||[]).join(" ")).includes(last))));
+      const best=(r&&r.items||[]).map(x=>x.volumeInfo).filter(ok).sort((a,b)=>b.description.length-a.description.length)[0];   // la présentation la plus complète
+      if(best&&best.description.length>=LONG-50){ putSum(b,clean(best.description),"google"); return done(); }
     }
-    // 3) Wikipédia : article du livre (on vérifie que l'auteur y est cité)
+    // 3) Wikipédia : la section « Résumé » de l'article du livre, sinon son introduction
     for(const q of [`"${b.title}" ${last}`,`intitle:"${b.title}"`]){
-      const w=await tmo(fetch("https://fr.wikipedia.org/w/api.php?origin=*&format=json&action=query&generator=search&gsrlimit=4&prop=extracts|info&inprop=url&exintro=1&explaintext=1&gsrsearch="+encodeURIComponent(q)).then(r=>r.json()));
-      const pg=w&&w.query&&Object.values(w.query.pages).sort((a,b)=>a.index-b.index).find(p=>p.extract&&p.extract.length>120&&norm(p.title).includes(nt.slice(0,10))&&(!last||norm(p.extract).includes(last))
-        // c'est bien un livre (pas le film ou la série tirés du livre)
-        &&/\b(roman|livre|essai|ouvrage|recueil|nouvelles?|poèmes?|bande dessinée|manga|pièce|conte|récit|saga|tome)\b/i.test(p.extract.slice(0,300))&&!/^[^.]{0,120}\b(est un film|est une série télévisée|est un téléfilm)\b/i.test(p.extract));
-      if(pg){ putSum(b,pg.extract.replace(/\s+/g," ").trim(),"wikipedia",pg.fullurl); b._sq=2; render(); return; }
+      const w=await tmo(fetch("https://fr.wikipedia.org/w/api.php?origin=*&format=json&action=query&generator=search&gsrlimit=4&prop=extracts|info&inprop=url&explaintext=1&exsectionformat=wiki&gsrsearch="+encodeURIComponent(q)).then(r=>r.json()));
+      const pg=w&&w.query&&Object.values(w.query.pages).sort((a,b)=>a.index-b.index).find(p=>p.extract&&p.extract.length>200&&norm(p.title).includes(nt.slice(0,10))&&(!last||norm(p.extract.slice(0,1500)).includes(last))
+        &&/\b(roman|livre|essai|ouvrage|recueil|nouvelles?|poèmes?|bande dessinée|manga|pièce|conte|récit|saga|tome)\b/i.test(p.extract.slice(0,400))&&!/^[^.]{0,120}\b(est un film|est une série télévisée|est un téléfilm)\b/i.test(p.extract));
+      if(pg){
+        const intro=pg.extract.split(/\n==/)[0].trim(), plot=wikiPlot("\n"+pg.extract);
+        let t=plot.length>=200?plot:intro;
+        if(t.length>1800) t=t.slice(0,1800).replace(/\s+\S*$/,"")+"…";
+        if(t.length>=150){ putSum(b,t,"wikipedia",pg.fullurl); return done(); }
+      }
     }
   }catch(e){}
-  b._sq=2; render();
+  done();
 }
 function keepExt(id){ const b=BY[id]; if(b&&b.ext&&!S.ext[id]) S.ext[id]={id:b.id,title:b.title,author:b.author,univ:b.univ,sub:b.sub,themes:b.themes,year:b.year,pages:b.pages,summary:b.sum,cover_url:b.cover,f:Object.fromEntries(Object.entries(b.f).map(([k,v])=>[k,Math.round(v*10)])),tagged_at:b.tagged?"1":null}; }
 Object.values(S.ext).forEach(addExt);
@@ -2488,7 +2506,7 @@ const VIEWS={
   fiche(s){
     const b=BY[s.id], e=S.lib[b.id], p=derive(), r=score(b,p), w=why(b,p,r);
     // Livre du catalogue : on va chercher son résumé à l'ouverture de la fiche
-    if(!b.sum&&!b._sq) loadSummary(b);
+    if(!b._sq&&!(b.long||(b.sum&&b.sum.length>=LONG))) loadSummary(b);
     let actions="";
     if(!e) actions=b.future?`<button class="b b-primary" style="flex:1" data-a="follow" data-id="${b.id}">${S.follow.includes(b.id)?"Sortie suivie":"Suivre la sortie"}</button>`:`<button class="b b-primary" style="flex:1" data-a="wish" data-id="${b.id}">Ajouter aux envies</button><button class="b b-ghost" data-a="ficheMore" data-id="${b.id}">Autres</button>`;
     else if(e.status==="envie") actions=`<button class="b b-primary" style="flex:1" data-a="editions" data-id="${b.id}">Où l'acheter</button><button class="b b-ghost" data-a="removeWish" data-id="${b.id}">Retirer</button>`;
@@ -2504,7 +2522,9 @@ const VIEWS={
       ${e?`<span class="tag" style="margin-top:12px;cursor:default;height:28px;font-size:13px">${esc(statusLine(b.id))}</span>`:""}</div>
       <div class="pad" style="padding-top:24px;display:flex;flex-direction:column;gap:24px">
         ${!e||e.status==="envie"?`<section class="ai">${AIMARK("Pourquoi ce livre")}<p class="ai-lead">${compatLabel(r.t)}</p><p class="t-body">${esc(whyShown(b,p,w))}</p>${w.src.length?`<div class="row-src">${w.src.map(id=>cover(BY[id],22,4)).join("")}<span class="t-foot muted">D'après ${w.src.length} livre${w.src.length>1?"s":""} de votre bibliothèque</span></div>`:""}</section>`:review}
-        <section style="display:flex;flex-direction:column;gap:8px"><h2 class="t-head">Résumé</h2><p class="t-body">${b.sum?esc(b.sum):`<span class="muted">${b._sq===1?"Recherche du résumé…":"Pas encore de résumé pour ce livre."}</span>`}</p>${b.sumSrc==="wikipedia"?`<p class="t-foot muted" style="font-size:12px">Source : <a href="${esc(b.sumUrl||"https://fr.wikipedia.org/wiki/"+encodeURIComponent(b.title))}" target="_blank" rel="noopener" style="color:inherit">Wikipédia</a>, licence CC BY-SA.</p>`:b.sumSrc==="google"?`<p class="t-foot muted" style="font-size:12px">Source : Google Books (présentation de l'éditeur).</p>`:""}<div class="tags" style="margin-top:4px">${b.themes.map(t=>`<span class="t-foot muted" style="padding:4px 8px;border:1px solid var(--hairline);border-radius:10px">${esc(t)}</span>`).join("")}</div></section>
+        <section style="display:flex;flex-direction:column;gap:8px"><h2 class="t-head">Résumé</h2>${(()=>{ const t=b.long||b.sum||"", open=T.sumOpen===b.id, cut=t.length>700&&!open;
+          if(!t) return `<p class="t-body"><span class="muted">${b._sq===1?"Recherche du résumé…":"Pas encore de résumé pour ce livre."}</span></p>`;
+          return `<p class="t-body" style="white-space:pre-line">${esc(cut?t.slice(0,650).replace(/\s+\S*$/,"")+"…":t)}</p>${cut?`<button class="b b-text" data-a="sumMore" data-id="${b.id}" style="align-self:flex-start;padding:0;min-height:44px">Lire la suite</button>`:""}${!b.long&&b._sq===1?`<p class="t-foot muted">Recherche d'un résumé plus complet…</p>`:""}`; })()}${b.sumSrc==="wikipedia"?`<p class="t-foot muted" style="font-size:12px">Source : <a href="${esc(b.sumUrl||"https://fr.wikipedia.org/wiki/"+encodeURIComponent(b.title))}" target="_blank" rel="noopener" style="color:inherit">Wikipédia</a>, licence CC BY-SA.</p>`:b.sumSrc==="google"?`<p class="t-foot muted" style="font-size:12px">Source : Google Books (présentation de l'éditeur).</p>`:""}<div class="tags" style="margin-top:4px">${b.themes.map(t=>`<span class="t-foot muted" style="padding:4px 8px;border:1px solid var(--hairline);border-radius:10px">${esc(t)}</span>`).join("")}</div></section>
         <div class="group"><button class="row" data-a="editions" data-id="${b.id}"><span>Où l'acheter</span><span class="r">${b.future?"À paraître":"Libraires et sites"}${ico("chev","chev")}</span></button></div>
       </div><div style="height:130px"></div></div>
     <div style="position:absolute;left:0;right:0;bottom:0;padding:12px 20px 32px;background:var(--paper);border-top:.5px solid var(--hairline);display:flex;gap:8px">${actions}</div>`;
@@ -2992,6 +3012,7 @@ const A={
   sqCancel(){ T.sq=""; T.sqPick=null; render(); },
   sqPickAi(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
   sqSearch(){ const q=(T.sq||"").trim(); if(!q) return; const i=document.getElementById("smartQ"); if(i) i.blur(); push("search",{q}); },
+  sumMore(d){ T.sumOpen=d.id; T.anim=null; render(); },
   authorF(d){ const top=T.stack[T.stack.length-1]; if(top&&top.v==="author"){ top.f=d.f; T.anim=null; render(); } },
   favAuthorToggle(d){ const L=S.prefs.authors; if(L.includes(d.q)) S.prefs.authors=L.filter(x=>x!==d.q); else L.push(d.q); update(); },
   sqOpen(d){ const i=document.getElementById("smartQ"); if(i) i.blur(); push("fiche",{id:d.id}); },
