@@ -1834,8 +1834,12 @@ function score(b,p){
   return {t:W.U*c.U+W.N*c.N+W.H*c.H+W.M*c.M+W.D*c.D+W.P*c.P-pen,c,W};
 }
 const rejected=b=>b.univ.some(x=>S.prefs.univ[x]===-1);
+// Livres mis en envie depuis une recommandation pendant cette visite : ils restent affichés, marque-page plein
+const KEPT={};
+const inWish=id=>!!(S.lib[id]&&S.lib[id].status==="envie");
+const markBtn=b=>{ const on=inWish(b.id); return `<button class="rec-mark${on?" on":""}" data-a="${on?"unwish":"wish"}" data-id="${b.id}" aria-pressed="${on}" aria-label="${on?"Retirer « "+esc(b.title)+" » de vos envies":"Ajouter « "+esc(b.title)+" » à vos envies"}">${ico(on?"markOn":"mark")}</button>`; };
 function candidates(p,opts={}){
-  return BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&!S.lib[b.id]&&!S.hidden[b.id]&&(opts.allowRejected||!rejected(b)))
+  return BOOKS.filter(b=>!b.future&&!(b.ext&&!b.tagged)&&(!S.lib[b.id]||(KEPT[b.id]&&inWish(b.id)))&&!S.hidden[b.id]&&(opts.allowRejected||!rejected(b)))
     // à score presque égal, on mélange livres analysés à la main et livres du catalogue (ordre stable sur la journée)
     .map(b=>({b,r:score(b,p),k:hash(b.id+new Date().toDateString())})).sort((x,y)=>(Math.round(y.r.t*40)-Math.round(x.r.t*40))||(x.k-y.k));
 }
@@ -1907,6 +1911,7 @@ const I={
   compass:"<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"1.5\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M13.024 14.5601C13.5166 14.363 13.763 14.2645 13.9562 14.095C14.0055 14.0518 14.0518 14.0055 14.095 13.9562C14.2645 13.763 14.363 13.5166 14.5601 13.024C15.484 10.7142 15.946 9.5593 15.4977 8.89964C15.3914 8.74324 15.2565 8.60834 15.1001 8.50206C14.4405 8.0538 13.2856 8.51575 10.9758 9.43966C10.4831 9.63673 10.2368 9.73527 10.0435 9.90474C9.99429 9.94792 9.94792 9.99429 9.90474 10.0435C9.73527 10.2368 9.63673 10.4831 9.43967 10.9758C8.51575 13.2856 8.0538 14.4405 8.50206 15.1001C8.60834 15.2565 8.74324 15.3914 8.89964 15.4977C9.5593 15.946 10.7142 15.484 13.024 14.5601Z\"/></g>",
   books:"<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"1.5\"><path d=\"M10 22H14C16.8284 22 18.2426 22 19.1213 21.1213C20 20.2426 20 18.8284 20 16V8C20 5.17157 20 3.75736 19.1213 2.87868C18.2426 2 16.8284 2 14 2H10C7.17157 2 5.75736 2 4.87868 2.87868C4 3.75736 4 5.17157 4 8V16C4 18.8284 4 20.2426 4.87868 21.1213C5.75736 22 7.17157 22 10 22Z\"/><path d=\"M7 16V2.07612\"/><path d=\"M19.9995 16H7.89761C6.96764 16 6.50265 16 6.12115 16.1022C5.08587 16.3796 4.29889 17.109 4.02148 18.1443\"/></g>",
   mark:"<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"1.5\"><path d=\"M21 11.0975V16.0909C21 19.1875 21 20.7358 20.2659 21.4123C19.9158 21.735 19.4739 21.9377 19.0031 21.9915C18.016 22.1045 16.8633 21.0849 14.5578 19.0458C13.5388 18.1445 13.0292 17.6938 12.4397 17.5751C12.1494 17.5166 11.8506 17.5166 11.5603 17.5751C10.9708 17.6938 10.4612 18.1445 9.44216 19.0458C7.13673 21.0849 5.98402 22.1045 4.99692 21.9915C4.52615 21.9377 4.08421 21.735 3.73411 21.4123C3 20.7358 3 19.1875 3 16.0909V11.0975C3 6.80891 3 4.6646 4.31802 3.3323C5.63604 2 7.75736 2 12 2C16.2426 2 18.364 2 19.682 3.3323C21 4.6646 21 6.80891 21 11.0975Z\"/><path d=\"M15 6H9\"/></g>",
+  markOn:"<path fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\" d=\"M21 11.0975V16.0909C21 19.1875 21 20.7358 20.2659 21.4123C19.9158 21.735 19.4739 21.9377 19.0031 21.9915C18.016 22.1045 16.8633 21.0849 14.5578 19.0458C13.5388 18.1445 13.0292 17.6938 12.4397 17.5751C12.1494 17.5166 11.8506 17.5166 11.5603 17.5751C10.9708 17.6938 10.4612 18.1445 9.44216 19.0458C7.13673 21.0849 5.98402 22.1045 4.99692 21.9915C4.52615 21.9377 4.08421 21.735 3.73411 21.4123C3 20.7358 3 19.1875 3 16.0909V11.0975C3 6.80891 3 4.6646 4.31802 3.3323C5.63604 2 7.75736 2 12 2C16.2426 2 18.364 2 19.682 3.3323C21 4.6646 21 6.80891 21 11.0975Z\"/>",
   user:"<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"1.5\"><circle cx=\"12\" cy=\"6\" r=\"4\"/><path d=\"M20 17.5C20 19.9853 20 22 12 22C4 22 4 19.9853 4 17.5C4 15.0147 7.58172 13 12 13C16.4183 13 20 15.0147 20 17.5Z\"/></g>",
   check:"<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M5 13L9 17L19 7\"/>",
   dash:"<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"1.5\" d=\"M20 12L4 12\"/>",
@@ -2236,7 +2241,7 @@ function recRow(x,n,p,withBtns){
   return `<div class="rec-row-wrap"><div class="rec-row">
     ${n?`<span class="rec-n" aria-hidden="true">${n}</span>`:""}
     <button class="rec-open" data-a="open" data-id="${x.b.id}">${cover(x.b,56,9.5)}<span class="rec-txt"><span class="tt">${esc(x.b.title)}</span><span class="t-foot muted">${esc(x.b.author)}</span><span class="rec-why">${esc(shortWhy(x.b,p,x.r))}</span></span></button>
-    ${withBtns?`<span class="rec-btns"><button class="rec-mark" data-a="wish" data-id="${x.b.id}" aria-label="Ajouter « ${esc(x.b.title)} » à vos envies">${ico("mark")}</button></span>`:moreBtn(x.b)}
+    ${withBtns?`<span class="rec-btns">${markBtn(x.b)}</span>`:moreBtn(x.b)}
   </div>${withBtns?"":recMenu(x.b.id)}</div>`;
 }
 
@@ -2262,7 +2267,7 @@ function rcCard(x,p,i){
       <div class="rc-head"><div style="display:flex;flex-direction:column;gap:6px;min-width:0">
         <h3 class="rc-title"><button class="linkish" data-a="open" data-id="${b.id}">${esc(b.title)}</button></h3>
         <span class="t-sub muted">${esc(b.author)}</span></div>
-        <button class="rec-mark" data-a="wish" data-id="${b.id}" aria-label="Ajouter « ${esc(b.title)} » à vos envies">${ico("mark")}</button></div>
+        ${markBtn(b)}</div>
       <p class="rc-why"><span>${esc(shortWhy(b,p,x.r))}</span></p>
     </div></article>`;
 }
@@ -3107,8 +3112,10 @@ const A={
   wish(d){ T.wf=d.f||null; T.walert=null; sheet("wish",{id:d.id,f:d.f}); },
   wf(d){ T.wf=d.f; T.walert=null; render(); },
   walert(){ const b=BY[T.sheet.id], f=T.wf||T.sheet.f||prefFormat(b), cur=T.walert!=null?T.walert:(f!=="any"&&!b.ed[f].avail); T.walert=!cur; render(); },
+  unwish(d){ const prev=S.lib[d.id]; if(!prev) return; delete S.lib[d.id]; KEPT[d.id]=1; save(); T.anim=null; render();
+    toast("Retiré de vos envies",()=>{ S.lib[d.id]=prev; save(); render(); }); },
   confirmWish(d){ const b=BY[d.id], f=T.wf||T.sheet.f||prefFormat(b), al=T.walert!=null?T.walert:(f!=="any"&&!b.ed[f].avail), prev=S.lib[d.id];
-    S.lib[d.id]={status:"envie",format:f,alert:al,date:today()};
+    S.lib[d.id]={status:"envie",format:f,alert:al,date:today()}; KEPT[d.id]=1;
     const h=S.history.find(x=>x.id===d.id); if(h) h.action="Ajouté aux envies"; else S.history.unshift({id:d.id,action:"Ajouté aux envies",date:today()});
     T.sheet=null; save(); const wt=f!=="any"&&!b.ed[f].avail; toast(wt?"Ajouté à « À attendre »":"Ajouté à vos envies",()=>{ if(prev)S.lib[d.id]=prev; else delete S.lib[d.id]; });
     if(T.prevSheet==="assistant"){ T.prevSheet=null; T.sheet={v:"assistant"}; } render(); scrollChat(); },
