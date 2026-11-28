@@ -906,7 +906,7 @@ html,body{font-family:var(--ui)}
 /* ===== Direction 4 : carrousel immersif ===== */
 #phone .rc{margin-top:24px}
 #phone .rc .rec-head{margin-bottom:14px}
-#phone .rc-track{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding-left:20px;padding:4px 20px 18px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#phone .rc-track{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding-left:20px;padding:4px 20px 56px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #phone .rc-track::-webkit-scrollbar{display:none}
 #phone .rc-card{flex:none;width:calc(100% - 56px);max-width:330px;scroll-snap-align:start;border-radius:28px;background:var(--paper,#fff);box-shadow:0 1px 2px rgba(0,0,0,.06),0 14px 36px rgba(0,0,0,.10);overflow:hidden;display:flex;flex-direction:column;border:0;padding:0;text-align:left;color:var(--ink)}
 #phone .rc-top{appearance:none;border:0;cursor:pointer;height:232px;background:var(--sand);display:flex;align-items:center;justify-content:center;padding:0}
@@ -921,7 +921,9 @@ html,body{font-family:var(--ui)}
 #phone .rc-end{cursor:pointer;justify-content:center;align-items:flex-start;gap:6px;padding:24px;background:var(--sand);box-shadow:none}
 #phone .rc-arrow{margin-top:8px;width:44px;height:44px;border-radius:999px;background:var(--ink);color:#fff;display:inline-flex;align-items:center;justify-content:center}
 #phone .rc-arrow svg{width:18px;height:18px}
-#phone .rc-dots{display:flex;justify-content:center;gap:6px}
+/* La piste défile en X, donc elle coupe aussi ce qui dépasse en Y : son bas (56 px) doit contenir toute l'ombre des cartes (14 + 36 px).
+   Les points remontent de 38 px pour rester à 18 px sous les cartes, posés sur l'ombre qui se fond dans le blanc. */
+#phone .rc-dots{display:flex;justify-content:center;gap:6px;position:relative;margin-top:-38px;pointer-events:none}
 #phone .rc-dots i{width:6px;height:6px;border-radius:3px;background:var(--line,#D9D9D5);transition:width .2s ease,background .2s ease}
 #phone .rc-dots i.on{width:18px;background:var(--ink)}
 #phone .mood-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
