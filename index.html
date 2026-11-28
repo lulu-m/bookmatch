@@ -1718,7 +1718,7 @@ function remoteSearch(q,done){
   if(REMOTE[k]){ done&&done(); return; }
   clearTimeout(_rq); _rq=setTimeout(async()=>{
     try{ const r=await fetch(`${API}/functions/v1/catalog-search?q=${encodeURIComponent(q.trim())}`); const d=await r.json();
-      REMOTE[k]=(d.results||[]).map(addExt).filter(Boolean).map(b=>b.id); done&&done(); }catch(e){ REMOTE[k]=[]; }
+      REMOTE[k]=(d.results||[]).map(addExt).filter(Boolean).map(b=>b.id); done&&done(); }catch(e){ REMOTE[k]=[]; done&&done(); }
   },350);
 }
 const remoteIds=q=>REMOTE[norm((q||"").trim())]||[];
@@ -3412,6 +3412,6 @@ if("serviceWorker" in navigator && location.protocol==="https:") window.addEvent
 </script>
 <!-- Scanner : vraie caméra (code-barres avec ZXing, couverture avec Tesseract) -->
 <script src="vendor/zxing.min.js"></script>
-<script src="scanner.js?v=13"></script>
+<script src="scanner.js?v=14"></script>
 </body>
 </html>

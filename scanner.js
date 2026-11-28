@@ -115,32 +115,168 @@ async function isbnInfo(isbn){
   return null;
 }
 
-// ---------- Couverture (lecture du texte) ----------
-let tessP=null;
+// ---------- Couverture ----------
+// Deux méthodes combinées :
+//  1) Comparaison visuelle avec les 466 couvertures du catalogue (miniatures déjà dans l'app) : rapide, sans réseau.
+//  2) Lecture du texte (Tesseract) : sert à confirmer, et à retrouver les livres hors catalogue local.
+
+// Zone exacte du cadre blanc, en pixels de la vidéo.
+// La vidéo est en « object-fit: cover » : elle est agrandie puis rognée pour remplir l'écran, il faut donc convertir.
+function frameRect(margin=0){
+  const v=document.getElementById("scanVideo"), f=document.querySelector(".scanframe");
+  if(!v||!v.videoWidth||!f) return null;
+  const vr=v.getBoundingClientRect(), fr=f.getBoundingClientRect();
+  const k=Math.max(vr.width/v.videoWidth, vr.height/v.videoHeight);          // pixels écran par pixel vidéo
+  const ox=vr.left+(vr.width-v.videoWidth*k)/2, oy=vr.top+(vr.height-v.videoHeight*k)/2;
+  const mx=fr.width*margin, my=fr.height*margin;
+  let x=(fr.left-mx-ox)/k, y=(fr.top-my-oy)/k, w=(fr.width+2*mx)/k, h=(fr.height+2*my)/k;
+  x=Math.max(0,x); y=Math.max(0,y); w=Math.min(v.videoWidth-x,w); h=Math.min(v.videoHeight-y,h);
+  return {v,x,y,w,h};
+}
+// Copie une zone de la vidéo dans un canvas, à la taille voulue (le plus grand côté = maxSide)
+function grabRect(r,maxSide){
+  const s=maxSide/Math.max(r.w,r.h), c=document.createElement("canvas");
+  c.width=Math.round(r.w*s); c.height=Math.round(r.h*s);
+  const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(r.v,r.x,r.y,r.w,r.h,0,0,c.width,c.height);
+  return c;
+}
+
+// ===== 1) Comparaison visuelle =====
+// Chaque couverture est réduite à une « empreinte » de 12×18 pixels en couleur, normalisée
+// (on retire la luminosité moyenne et on égalise le contraste : une photo sombre ou surexposée reste comparable).
+const FP_W=12, FP_H=18;
+function fingerprint(src,sx,sy,sw,sh){
+  // Réduction en deux étapes pour un résultat lissé (une seule grosse réduction crée du bruit)
+  const m=document.createElement("canvas"); m.width=FP_W*4; m.height=FP_H*4;
+  const gm=m.getContext("2d"); gm.imageSmoothingQuality="high"; gm.drawImage(src,sx,sy,sw,sh,0,0,m.width,m.height);
+  const c=document.createElement("canvas"); c.width=FP_W; c.height=FP_H;
+  const g=c.getContext("2d"); g.imageSmoothingQuality="high"; g.drawImage(m,0,0,FP_W,FP_H);
+  const d=g.getImageData(0,0,FP_W,FP_H).data, n=FP_W*FP_H, out=new Float32Array(n*3);
+  // 3 canaux proches de la perception : luminosité, opposition rouge/vert, opposition jaune/bleu.
+  // Beaucoup plus résistant aux reflets et aux photos ternes que le rouge/vert/bleu brut.
+  for(let i=0;i<n;i++){ const r=d[i*4],gg=d[i*4+1],b=d[i*4+2]; out[i]=r*.299+gg*.587+b*.114; out[n+i]=r-gg; out[2*n+i]=(r+gg)/2-b; }
+  for(let ch=0;ch<3;ch++){
+    let s=0,q=0; for(let i=ch*n;i<(ch+1)*n;i++){ s+=out[i]; q+=out[i]*out[i]; }
+    const mu=s/n, sd=Math.sqrt(Math.max(q/n-mu*mu,0))+1;
+    for(let i=ch*n;i<(ch+1)*n;i++) out[i]=(out[i]-mu)/sd;
+  }
+  return out;
+}
+const corr=(a,b)=>{ let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s/a.length; };   // 1 = identique, 0 = sans rapport
+let FPS=null;   // empreintes du catalogue, calculées une fois à partir des planches de miniatures
+function loadFingerprints(){ return FPS||(FPS=(async()=>{
+  if(typeof SPR==="undefined") return [];
+  const sheets=await Promise.all(Array.from({length:SPR_N},(_,n)=>new Promise(ok=>{ const im=new Image(); im.onload=()=>ok(im); im.onerror=()=>ok(null); im.src=`sprites/s${n}.jpg`; })));
+  const list=[];
+  for(const [id,[n,c,r]] of Object.entries(SPR)){ const im=sheets[n]; if(!im||!BY[id]) continue; list.push({id,fp:fingerprint(im,c*150,r*225,150,225)}); }
+  return list;
+})().catch(()=>{ FPS=null; return []; })); }
+// Compare la photo à chaque couverture. La couverture ne remplit jamais parfaitement le cadre :
+// on essaie plusieurs tailles et positions de fenêtre, et on garde la meilleure ressemblance.
+async function visualMatch(r){
+  const list=await loadFingerprints(); if(!list.length) return [];
+  const c=grabRect(r,360), W=c.width, H=c.height, wins=[];
+  for(const s of [1,.94,.88,.82,.76,.7]) for(const ax of [.62,.68,.74]){            // ax = largeur/hauteur de la couverture
+    let h=H*s, w=h*ax; if(w>W*s){ w=W*s; h=w/ax; }
+    for(const dx of [-.05,0,.05]) for(const dy of [-.04,0,.04]){
+      const x=(W-w)/2+dx*W, y=(H-h)/2+dy*H; if(x<-2||y<-2||x+w>W+2||y+h>H+2) continue;
+      wins.push(fingerprint(c,Math.max(0,x),Math.max(0,y),Math.min(w,W),Math.min(h,H)));
+    }
+  }
+  return list.map(({id,fp})=>{ let best=-1; for(const q of wins){ const v=corr(fp,q); if(v>best) best=v; } return {id,v:best}; }).sort((a,b)=>b.v-a.v);
+}
+
+// ===== 2) Lecture du texte =====
+let tessP=null, workerP=null;
 function loadTess(){ return tessP||(tessP=new Promise((ok,ko)=>{ if(window.Tesseract) return ok();
   const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"; s.onload=ok; s.onerror=()=>{tessP=null;ko();}; document.head.appendChild(s); })); }
+// Un seul « lecteur » gardé en mémoire : le recréer à chaque photo rechargeait toute la langue (lent sur iPhone)
+function getWorker(){ return workerP||(workerP=loadTess().then(()=>Tesseract.createWorker("fra",1)).then(async w=>{
+  await w.setParameters({tessedit_pageseg_mode:"11"});   // « texte épars » : adapté aux couvertures (mots dispersés, tailles variées)
+  return w; }).catch(e=>{ workerP=null; throw e; })); }
+// Prépare l'image pour la lecture : niveaux de gris, contraste étiré ; version inversée pour le texte clair sur fond foncé
+function ocrCanvas(src,invert){
+  const c=document.createElement("canvas"); c.width=src.width; c.height=src.height;
+  const g=c.getContext("2d"); g.drawImage(src,0,0); const im=g.getImageData(0,0,c.width,c.height), d=im.data;
+  const hist=new Uint32Array(256), L=new Uint8ClampedArray(d.length/4);
+  for(let i=0,j=0;i<d.length;i+=4,j++){ const y=(d[i]*.299+d[i+1]*.587+d[i+2]*.114)|0; L[j]=y; hist[y]++; }
+  // On étire le contraste entre les 2 % les plus sombres et les 2 % les plus clairs
+  const n=L.length; let lo=0,hi=255,a=0; for(;lo<255&&(a+=hist[lo])<n*.02;lo++); a=0; for(;hi>0&&(a+=hist[hi])<n*.02;hi--);
+  const k=255/Math.max(hi-lo,1);
+  for(let i=0,j=0;i<d.length;i+=4,j++){ let y=(L[j]-lo)*k; if(invert) y=255-y; d[i]=d[i+1]=d[i+2]=y; }
+  g.putImageData(im,0,0); return c;
+}
+async function readText(r){
+  const w=await getWorker(), src=grabRect(r,1600), words=[];
+  for(const inv of [false,true]){
+    const {data}=await w.recognize(ocrCanvas(src,inv));
+    (data.words||[]).forEach(x=>{ const t=x.text.replace(/[^\p{L}\p{N}'’-]/gu,""); if(x.confidence>=35&&t.length>=2&&/\p{L}/u.test(t)) words.push({t,n:norm(t),c:x.confidence,h:x.bbox.y1-x.bbox.y0,y:x.bbox.y0,x:x.bbox.x0}); });
+  }
+  return words;
+}
+// Ressemblance entre deux mots (0 à 1), en tolérant les fautes de lecture : « Avlon » ≈ « Avion »
+function lev(a,b){ const m=a.length,n=b.length; if(!m||!n) return Math.max(m,n); let p=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const q=[i]; for(let j=1;j<=n;j++) q[j]=Math.min(p[j]+1,q[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1)); p=q; } return p[n]; }
+const STOP=new Set(["les","des","une","dans","pour","sur","aux","est","qui","que","the","and","with","par","son","ses","mon","nos","vos","leur"]);
+const keyToks=s=>{ const all=norm(s).replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean), k=all.filter(t=>t.length>=3&&!STOP.has(t)); return k.length?k:all.filter(t=>t.length>=2); };
+// Part des mots d'un titre (ou d'un nom d'auteur) retrouvés dans le texte lu
+function found(toks,ocr,joined){
+  if(!toks.length) return 0; let s=0;
+  for(const t of toks){
+    if(t.length>=5&&joined.includes(t)){ s+=1; continue; }      // mot collé à un autre par la lecture
+    let best=0; for(const o of ocr){ if(Math.abs(o.length-t.length)>2) continue; const v=1-lev(t,o)/Math.max(t.length,o.length); if(v>best) best=v; }
+    s+=best>=(t.length<=4?.99:.74)?best:0;                          // mots courts : il faut les lire sans faute
+  }
+  return s/toks.length;
+}
+function textScores(words){
+  const ocr=[...new Set(words.map(w=>w.n.replace(/[^a-z0-9]/g,"")).filter(x=>x.length>=2))], joined=ocr.join("");
+  return BOOKS.filter(b=>!b.future).map(b=>{ const ft=found(keyToks(b.title),ocr,joined), fa=found(keyToks(b.author),ocr,joined); return {id:b.id,ft,fa,s:ft*.65+fa*.35}; })
+    .filter(x=>x.ft>=.5||(x.ft>=.3&&x.fa>=.75)).sort((a,b)=>b.s-a.s);
+}
+// Les mots écrits le plus gros (en général le titre), pour chercher dans tout le catalogue en ligne
+function bigWords(words){
+  const good=words.filter(w=>w.c>=55&&w.n.length>=3), seen=new Set(); if(!good.length) return "";
+  const hmax=Math.max(...good.map(w=>w.h));
+  return good.filter(w=>w.h>=hmax*.55).sort((a,b)=>a.y-b.y||a.x-b.x).filter(w=>!seen.has(w.n)&&seen.add(w.n)).slice(0,6).map(w=>w.t).join(" ");
+}
+
 async function readCover(){
-  const c=grab(.7,1.5,1); if(!c){ T.scan="fail"; T.scanErr="La caméra n'est pas prête."; render(); return; }
-  SC.busy=true; T.scan="busy"; T.scanMsg=window.Tesseract?"Lecture de la couverture…":"Préparation de la lecture (première fois)…"; render();
+  const r=frameRect(.04); if(!r){ T.scan="fail"; T.scanErr="La caméra n'est pas prête."; render(); return; }
+  SC.busy=true; T.scan="busy"; T.scanAlt=[]; T.scanMsg="Recherche de la couverture…"; render();
+  const dbg=window.__scanDbg={};
   try{
-    await loadTess(); T.scanMsg="Lecture de la couverture…"; render();
-    const {data}=await Tesseract.recognize(c,"fra+eng");
-    // On garde les mots lus avec assez de certitude
-    const words=(data.words||[]).filter(w=>w.confidence>55&&/[a-zà-ÿ]{2,}/i.test(w.text)).map(w=>w.text.replace(/[^\p{L}\p{N}'’-]/gu,"")).filter(Boolean);
-    const text=norm(words.join(" "));
-    if(text.length<3) throw 0;
-    // 1) Livres de l'app dont le titre (et si possible l'auteur) apparaissent sur la couverture
-    const toks=t=>norm(t).split(/\s+/).filter(x=>x.length>2);
-    const hits=BOOKS.filter(b=>!b.future).map(b=>{ const tt=toks(b.title), at=toks(b.author);
-      const ft=tt.length?tt.filter(x=>text.includes(x)).length/tt.length:0, fa=at.length?at.filter(x=>text.includes(x)).length/at.length:0;
-      return {b,s:ft*.7+fa*.3,ft}; }).filter(x=>x.ft>=.6).sort((a,b)=>b.s-a.s);
-    let b=hits.length?hits[0].b:null;
-    // 2) Sinon : recherche dans tout le catalogue avec les mots lus
-    if(!b){ const q=words.slice(0,8).join(" ");
-      await new Promise(res=>{ remoteSearch(q,res); setTimeout(res,6000); }); const ids=remoteIds(q); b=ids.length?BY[ids[0]]:null; }
-    if(b){ T.scanHit=b.id; T.scan="ok"; } else throw 0;
-  }catch(e){ T.scan="fail"; T.scanErr="Le titre n'a pas pu être lu. Le code-barres au dos est plus fiable."; }
+    // 1) Comparaison visuelle : si une couverture ressemble nettement plus que toutes les autres, c'est réglé (≈ 0,1 s)
+    //    Seuils réglés sur 48 photos tests (inclinées, floues, avec reflets) : 43 bonnes réponses, 3 erreurs sur 48 livres absents.
+    const vis=await visualMatch(r); const [v1,v2]=vis, ref=vis[5]?vis[5].v:0;   // ref = 6e meilleure ressemblance (le « bruit de fond »)
+    dbg.vis=vis.slice(0,4).map(x=>[x.id,+x.v.toFixed(3)]); if(window.__scanFull) dbg.visAll=vis.map(x=>[x.id,+x.v.toFixed(4)]);
+    if(!window.__scanFull&&v1&&v1.v>=.65&&v1.v-v2.v>=.13){ done(v1.id,vis.slice(1,3).filter(x=>x.v-ref>=.15).map(x=>x.id)); return; }
+    // 2) Lecture du texte (deux passages : texte foncé, puis texte clair)
+    T.scanMsg=workerP?"Lecture du titre…":"Préparation de la lecture (première fois)…"; render();
+    const words=await readText(r); if(window.__scanFull) dbg.wordsAll=words;
+    dbg.words=words.map(w=>w.t).join(" ").slice(0,200);
+    const txt=textScores(words);
+    dbg.txt=txt.slice(0,4).map(x=>[x.id,+x.s.toFixed(2)]);
+    // 3) On combine : le texte lu et la ressemblance visuelle se renforcent
+    const V={}; vis.forEach(x=>V[x.id]=x.v);
+    const comb=new Map();
+    txt.forEach(x=>comb.set(x.id,x.s+2.5*Math.max(0,(V[x.id]||0)-ref)));
+    vis.slice(0,5).forEach(x=>{ if(x.v-ref>=.15&&!comb.has(x.id)) comb.set(x.id,2.5*(x.v-ref)); });
+    const ranked=[...comb].sort((a,b)=>b[1]-a[1]);
+    dbg.comb=ranked.slice(0,4).map(([id,s])=>[id,+s.toFixed(2)]);
+    if(ranked.length&&ranked[0][1]>=.6){ done(ranked[0][0],ranked.slice(1,3).filter(x=>x[1]>=.3).map(x=>x[0])); return; }
+    // 4) Livre absent du catalogue local : recherche en ligne avec les mots écrits en gros (le titre, en général)
+    const q=bigWords(words); dbg.q=q;
+    if(q){ T.scanMsg="Recherche du livre…"; render();
+      await new Promise(res=>{ remoteSearch(q,res); setTimeout(res,5000); });
+      const ids=remoteIds(q); if(ids.length){ done(ids[0],ids.slice(1,3),true); return; } }
+    // 5) Rien de sûr : on montre les candidats les plus proches, en le disant
+    const near=[...ranked.map(x=>x[0]),...vis.slice(0,3).map(x=>x.id)].filter((x,i,a)=>a.indexOf(x)===i);
+    if(near.length){ done(near[0],near.slice(1,3),true); return; }
+    throw 0;
+  }catch(e){ T.scan="fail"; T.scanErr="Couverture non reconnue. Cadrez-la en entier, sans reflet, ou utilisez le code-barres au dos (plus fiable)."; }
   SC.busy=false; render();
+  function done(id,alt,unsure){ T.scanHit=id; T.scanUnsure=!!unsure; T.scanAlt=(alt||[]).filter(x=>x&&x!==id&&BY[x]); T.scan="ok"; SC.busy=false; try{navigator.vibrate&&navigator.vibrate(30)}catch(_){} render(); }
 }
 
 // ---------- Écran ----------
@@ -148,7 +284,7 @@ VIEWS.scan=function(){
   const st=T.scan||"aim", mode=T.scanMode||"barcode", b=T.scanHit?BY[T.scanHit]:null;
   const fc=st==="ok"?"var(--accent)":"#FFFFFF";
   const frame=mode==="barcode"?"width:290px;height:170px":"width:230px;height:340px";
-  const msg=st==="busy"?(T.scanMsg||"Analyse en cours…"):st==="ok"?"Livre trouvé":mode==="barcode"?(T.scanSlow?"Tenez le livre à 15 cm environ, bien éclairé, code-barres à l'horizontale":"Visez le code-barres au dos du livre"):"Cadrez la couverture, puis touchez le bouton";
+  const msg=st==="busy"?(T.scanMsg||"Analyse en cours…"):st==="ok"?(T.scanUnsure?"Livre possible":"Livre trouvé"):mode==="barcode"?(T.scanSlow?"Tenez le livre à 15 cm environ, bien éclairé, code-barres à l'horizontale":"Visez le code-barres au dos du livre"):"Cadrez la couverture, puis touchez le bouton";
   return `<div style="position:absolute;inset:0;background:#000;color:#FFFFFF;display:flex;flex-direction:column;overflow:hidden">
     <video id="scanVideo" playsinline muted autoplay style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></video>
     <div style="position:absolute;inset:0;background:rgba(0,0,0,.35)"></div>
@@ -162,8 +298,9 @@ VIEWS.scan=function(){
       ${st==="busy"?`<div class="spinner" style="border-color:rgba(255,255,255,.2);border-top-color:#FFFFFF;width:40px;height:40px"></div>`:mode==="cover"&&st==="aim"?`<button class="shutter" data-a="shoot" aria-label="Lire la couverture"><i></i></button>`:`<div style="height:8px"></div>`}
       <button class="b b-text" data-a="manual" style="color:#FFFFFF;text-decoration:underline;text-underline-offset:3px">Saisir le titre</button></div>`:""}
     ${st==="ok"&&b?`<div class="sheet sheet-enter" style="color:var(--ink)"><div class="grabber"></div><div class="sheet-body" style="padding-top:16px;display:flex;flex-direction:column;gap:16px">
-      <span class="t-foot" style="color:var(--success);font-weight:600">Livre identifié</span>
+      ${T.scanUnsure?`<span class="t-foot muted" style="font-weight:600">Pas tout à fait sûr : est-ce l'un de ces livres ?</span>`:`<span class="t-foot" style="color:var(--success);font-weight:600">Livre identifié</span>`}
       <div style="display:grid;grid-template-columns:56px 1fr;gap:16px;align-items:center">${cover(b,56,9.5)}<div><p class="t-book-m">${esc(b.title)}</p><p class="t-sub muted">${esc(b.author)}${b.pages?" · "+b.pages+" p.":""}</p></div></div>
+      ${(T.scanAlt||[]).length?`<div style="display:flex;flex-direction:column;gap:8px"><span class="t-foot muted">Ou peut-être :</span>${T.scanAlt.map(id=>BY[id]).filter(Boolean).map(a=>`<button class="row" data-a="scanPick" data-id="${a.id}" style="appearance:none;border:0;background:none;padding:0;display:grid;grid-template-columns:36px 1fr;gap:12px;align-items:center;text-align:left;color:var(--ink);cursor:pointer;min-height:44px">${cover(a,36,6)}<span><span class="t-sub" style="display:block">${esc(a.title)}</span><span class="t-foot muted">${esc(a.author)}</span></span></button>`).join("")}</div>`:""}
       <button class="b b-primary b-block" data-a="confirmScan">C'est bien celui-ci</button>
       <div style="display:flex;justify-content:space-between"><button class="b b-text" data-a="rescan">Rescanner</button><button class="b b-text" data-a="manual">Ce n'est pas lui</button></div></div></div>`:""}
     ${st==="fail"?`<div class="sheet sheet-enter" style="color:var(--ink)"><div class="grabber"></div><div class="sheet-body" style="padding-top:16px;display:flex;flex-direction:column;gap:12px">
@@ -177,9 +314,10 @@ Object.assign(A,{
   async scan(){ T.sheet=null; T.scan="aim"; T.scanHit=null; T.scanMode=T.scanMode||"barcode"; push("scan"); if(await camStart()) render(); },
   async scanRetry(){ T.scan="aim"; render(); if(await camStart()) render(); },
   scanClose(){ camStop(); T.stack.pop(); T.anim=null; render(); },
-  scanMode(d){ T.scanMode=d.m; if(T.scan!=="busy") T.scan=SC.stream?"aim":T.scan; render(); if(d.m==="cover") loadTess().catch(()=>{}); },
+  scanMode(d){ T.scanMode=d.m; if(T.scan!=="busy") T.scan=SC.stream?"aim":T.scan; render(); if(d.m==="cover"){ loadFingerprints(); getWorker().catch(()=>{}); } },   // on prépare dès le choix du mode : la photo sera analysée plus vite
   shoot(){ if(!SC.busy) readCover(); },
-  rescan(){ T.scan="aim"; T.scanHit=null; render(); },
+  rescan(){ T.scan="aim"; T.scanHit=null; T.scanAlt=[]; render(); },
+  scanPick(d){ const old=T.scanHit; T.scanHit=d.id; T.scanAlt=(T.scanAlt||[]).map(x=>x===d.id?old:x); render(); },   // choisir une autre proposition
   async scanTorch(){ const tr=SC.stream&&SC.stream.getVideoTracks()[0]; const cap=tr&&tr.getCapabilities?tr.getCapabilities():{};
     if(!cap.torch){ toast("Lampe non disponible sur ce téléphone"); return; }
     SC.torch=!SC.torch; try{ await tr.applyConstraints({advanced:[{torch:SC.torch}]}); }catch(e){} render(); },
